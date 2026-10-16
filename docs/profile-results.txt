@@ -1,0 +1,9 @@
+    Blocking waiting for file lock on build directory
+   Compiling folio-reader v0.1.0 (/workspace/scratch/07feacc51eb0/folio)
+    Finished `release` profile [optimized] target(s) in 1m 44s
+     Running `folio/target/release/examples/profile`
+10,000-entry scan + sort: 32.989607ms (10000 entries)
+PDF metadata: 21.097158ms (3 pages)
+Cold thumbnail: 21.508401ms
+Cached thumbnail: 72.697µs
+Page render: 238.629279ms (1746 x 2400, 16761600 RGBA bytes)

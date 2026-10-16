@@ -1,0 +1,36 @@
+   Compiling folio-reader v0.1.0 (/workspace/scratch/07feacc51eb0/folio)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 1.30s
+     Running unittests src/lib.rs (folio/target/debug/deps/folio_reader-5afdf1bce0a1c5fa)
+
+running 3 tests
+test library::tests::symlink_escape_is_omitted ... ok
+test library::tests::immediate_case_insensitive_sorted_and_confined ... ok
+test store::tests::durable_independent_state_and_mru ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/main.rs (folio/target/debug/deps/folio_reader-95268d075ada30cf)
+
+running 1 test
+test app::tests::compact_and_wide_layouts_virtualize_large_libraries ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s
+
+     Running tests/rendering.rs (folio/target/debug/deps/rendering-cbdbe1af1f6a1d2b)
+
+running 3 tests
+test disk_cache_has_a_budget ... ok
+test cancellation_invalid_pdf_and_unwritable_cache ... ok
+test renders_pages_and_reuses_preview_without_renderer ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.55s
+
+   Doc-tests folio_reader
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
+    Checking folio-reader v0.1.0 (/workspace/scratch/07feacc51eb0/folio)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.44s
