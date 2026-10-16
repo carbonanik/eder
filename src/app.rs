@@ -40,6 +40,7 @@ enum Task {
     Open(PathBuf, bool, u64),
     Position(PathBuf, u32, bool),
     Dark(bool),
+    ReadingMode(bool),
     Close,
     Shutdown,
 }
@@ -52,6 +53,7 @@ enum Event {
     Error(String),
     Fatal(String),
     Dark(bool),
+    ReadingMode(bool),
     Closed,
 }
 struct PageJob {
@@ -62,6 +64,7 @@ struct PageJob {
 }
 struct PageResult {
     id: u64,
+    page: u32,
     result: Result<image::RgbaImage, String>,
 }
 struct ThumbJob {
@@ -81,6 +84,9 @@ struct Reader {
     loading: bool,
     zoom: f32,
     cache: VecDeque<(u32, bool, TextureHandle)>,
+    pending_page: Option<u32>,
+    failed: HashSet<u32>,
+    scroll_to_page: Option<u32>,
 }
 
 pub struct Folio {
@@ -208,6 +214,11 @@ fn data_worker(
                     send(Event::Dark(b));
                     return Ok(());
                 }
+                Task::ReadingMode(b) => {
+                    store.continuous_scroll(b)?;
+                    send(Event::ReadingMode(b));
+                    return Ok(());
+                }
                 Task::Close => {
                     store.clear_pending()?;
                     return Ok(());
@@ -289,7 +300,14 @@ impl Folio {
                     }
                 }
                 if gen.load(Ordering::Acquire) == job.id {
-                    if page_tx.send(PageResult { id: job.id, result }).is_err() {
+                    if page_tx
+                        .send(PageResult {
+                            id: job.id,
+                            page: job.page,
+                            result,
+                        })
+                        .is_err()
+                    {
                         break;
                     }
                     ctx.request_repaint();
@@ -388,6 +406,8 @@ impl Folio {
     fn render(&mut self) {
         if let Some(r) = &mut self.reader {
             let id = self.page_gen.fetch_add(1, Ordering::AcqRel) + 1;
+            r.pending_page = None;
+            r.failed.remove(&r.page);
             if let Some(index) = r
                 .cache
                 .iter()
@@ -415,8 +435,34 @@ impl Folio {
             let page = page.clamp(1, r.total);
             if page != r.page && self.send(Task::Position(r.path.clone(), page, false)) {
                 self.reader.as_mut().unwrap().page = page;
-                self.render();
+                if self.state.continuous_scroll {
+                    self.reader.as_mut().unwrap().scroll_to_page = Some(page);
+                } else {
+                    self.render();
+                }
             }
+        }
+    }
+    fn queue_continuous_page(&mut self, page: u32) {
+        let id = self.page_gen.load(Ordering::Acquire);
+        if let Some(reader) = &mut self.reader {
+            if reader.pending_page.is_some()
+                || reader.failed.contains(&page)
+                || reader
+                    .cache
+                    .iter()
+                    .any(|(cached_page, dark, _)| *cached_page == page && *dark == self.state.dark)
+            {
+                return;
+            }
+            reader.pending_page = Some(page);
+            *self.pages.0.lock().unwrap() = Some(PageJob {
+                path: reader.path.clone(),
+                page,
+                dark: self.state.dark,
+                id,
+            });
+            self.pages.1.notify_one();
         }
     }
     fn back(&mut self) {
@@ -473,8 +519,15 @@ impl Folio {
                             loading: true,
                             zoom: 1.0,
                             cache: VecDeque::new(),
+                            pending_page: None,
+                            failed: HashSet::new(),
+                            scroll_to_page: Some(page),
                         });
-                        self.render();
+                        if self.state.continuous_scroll {
+                            self.reader.as_mut().unwrap().loading = false;
+                        } else {
+                            self.render();
+                        }
                     }
                 }
                 Event::Recovery(p) => self.open(p, true),
@@ -488,7 +541,17 @@ impl Folio {
                 }
                 Event::Dark(dark) => {
                     self.state.dark = dark;
-                    self.render();
+                    if self.state.continuous_scroll {
+                        self.page_gen.fetch_add(1, Ordering::AcqRel);
+                        if let Some(reader) = &mut self.reader {
+                            reader.pending_page = None;
+                        }
+                    } else {
+                        self.render();
+                    }
+                }
+                Event::ReadingMode(continuous_scroll) => {
+                    self.state.continuous_scroll = continuous_scroll;
                 }
                 Event::Fatal(s) => {
                     self.fatal = true;
@@ -504,11 +567,16 @@ impl Folio {
         while let Ok(result) = self.page_rx.try_recv() {
             if result.id == self.page_gen.load(Ordering::Acquire) {
                 if let Some(r) = &mut self.reader {
-                    r.loading = false;
+                    if r.pending_page == Some(result.page) {
+                        r.pending_page = None;
+                    }
+                    if result.page == r.page {
+                        r.loading = false;
+                    }
                     match result.result {
                         Ok(image) => {
                             let t = texture(ctx, "page", image);
-                            r.cache.push_back((r.page, self.state.dark, t.clone()));
+                            r.cache.push_back((result.page, self.state.dark, t.clone()));
                             while r
                                 .cache
                                 .iter()
@@ -518,9 +586,14 @@ impl Folio {
                             {
                                 r.cache.pop_front();
                             }
-                            r.texture = Some(t);
+                            if result.page == r.page {
+                                r.texture = Some(t);
+                            }
                         }
-                        Err(e) => self.message = Some((e, true)),
+                        Err(e) => {
+                            r.failed.insert(result.page);
+                            self.message = Some((e, true));
+                        }
                     }
                 }
             }
@@ -633,6 +706,19 @@ impl Folio {
             }
         }
         ui.add_space(28.0);
+        ui.separator();
+        ui.add_space(18.0);
+        ui.label(RichText::new("Reading Mode").strong());
+        ui.label("Choose how pages are displayed when you open a PDF.");
+        let mut continuous_scroll = self.state.continuous_scroll;
+        ui.horizontal(|ui| {
+            ui.radio_value(&mut continuous_scroll, false, "Single Page");
+            ui.radio_value(&mut continuous_scroll, true, "Continuous Scroll");
+        });
+        if continuous_scroll != self.state.continuous_scroll {
+            self.send(Task::ReadingMode(continuous_scroll));
+        }
+        ui.add_space(18.0);
         ui.separator();
         ui.label("Local storage only · No account · No document uploads");
         ui.label(
@@ -917,14 +1003,137 @@ impl Folio {
                 return;
             }
         }
-        egui::CentralPanel::default().frame(egui::Frame::none().fill(if self.state.dark{Color32::from_rgb(24,27,31)}else{Color32::from_rgb(218,223,226)}).inner_margin(18.0)).show(ctx,|ui|{
-            let r=self.reader.as_ref().unwrap();
-            if r.loading{ui.centered_and_justified(|ui|{ui.spinner();});return;}
-            if let Some(t)=&r.texture {
-                let size=t.size_vec2();let fit=(ui.available_width()/size.x).min(ui.available_height()/size.y).min(1.0);let size=size*fit*r.zoom;
-                egui::ScrollArea::both().id_salt(("page",r.page)).show(ui,|ui|{ui.horizontal(|ui|{ui.add_space(((ui.available_width()-size.x)/2.0).max(0.0));ui.add(egui::Image::new(t).fit_to_exact_size(size));});});
-            }else{ui.label("This page could not be rendered. Try another page or return to the library.");if ui.button("Retry page").clicked(){self.render();}}
-        });
+        egui::CentralPanel::default()
+            .frame(
+                egui::Frame::none()
+                    .fill(if self.state.dark {
+                        Color32::from_rgb(24, 27, 31)
+                    } else {
+                        Color32::from_rgb(218, 223, 226)
+                    })
+                    .inner_margin(18.0),
+            )
+            .show(ctx, |ui| {
+                if self.state.continuous_scroll {
+                    self.continuous_reader_ui(ui);
+                    return;
+                }
+                let r = self.reader.as_ref().unwrap();
+                if r.loading {
+                    ui.centered_and_justified(|ui| {
+                        ui.spinner();
+                    });
+                    return;
+                }
+                if let Some(t) = &r.texture {
+                    let size = t.size_vec2();
+                    let fit = (ui.available_width() / size.x)
+                        .min(ui.available_height() / size.y)
+                        .min(1.0);
+                    let size = size * fit * r.zoom;
+                    egui::ScrollArea::both()
+                        .id_salt(("page", r.page))
+                        .show(ui, |ui| {
+                            ui.horizontal(|ui| {
+                                ui.add_space(((ui.available_width() - size.x) / 2.0).max(0.0));
+                                ui.add(egui::Image::new(t).fit_to_exact_size(size));
+                            });
+                        });
+                } else {
+                    ui.label("This page could not be rendered. Try another page or return to the library.");
+                    if ui.button("Retry page").clicked() {
+                        self.render();
+                    }
+                }
+            });
+    }
+    fn continuous_reader_ui(&mut self, ui: &mut egui::Ui) {
+        let (total, zoom) = {
+            let reader = self.reader.as_ref().unwrap();
+            (reader.total, reader.zoom)
+        };
+        let row_height = (ui.available_width() * 1.42 * zoom).max(300.0);
+        let initial_page = self
+            .reader
+            .as_mut()
+            .unwrap()
+            .scroll_to_page
+            .take()
+            .map(|page| page.clamp(1, total));
+        let mut first_visible = None;
+        let mut requested_page = None;
+        let mut retry_page = None;
+        let mut draw_pages = |ui: &mut egui::Ui, range: std::ops::Range<usize>| {
+            first_visible = range
+                .start
+                .checked_add(1)
+                .map(|page| (page as u32).min(total));
+            for index in range {
+                let page = index as u32 + 1;
+                let reader = self.reader.as_ref().unwrap();
+                let texture = reader
+                    .cache
+                    .iter()
+                    .find(|(cached_page, dark, _)| *cached_page == page && *dark == self.state.dark)
+                    .map(|(_, _, texture)| texture.clone());
+                let failed = reader.failed.contains(&page);
+                if texture.is_none() && !failed && requested_page.is_none() {
+                    requested_page = Some(page);
+                }
+                ui.allocate_ui_with_layout(
+                    Vec2::new(ui.available_width(), row_height),
+                    egui::Layout::top_down(egui::Align::Center),
+                    |ui| {
+                        ui.label(format!("Page {page}"));
+                        if let Some(texture) = texture {
+                            let available = (ui.available_width() - 24.0).max(1.0);
+                            let available_height = (row_height - 42.0).max(1.0);
+                            let image_size = texture.size_vec2();
+                            let scale = (available * zoom / image_size.x)
+                                .min(available_height / image_size.y);
+                            let image_size = image_size * scale;
+                            ui.add(egui::Image::new(&texture).fit_to_exact_size(image_size));
+                        } else if failed {
+                            ui.label("This page could not be rendered.");
+                            if ui.button("Retry page").clicked() {
+                                retry_page = Some(page);
+                            }
+                        } else {
+                            ui.spinner();
+                        }
+                    },
+                );
+                ui.add_space(12.0);
+            }
+        };
+        let scroll_area = egui::ScrollArea::vertical()
+            .id_salt((
+                "continuous-pages",
+                self.reader.as_ref().unwrap().path.clone(),
+            ))
+            .auto_shrink([false, false]);
+        if let Some(page) = initial_page {
+            scroll_area
+                .vertical_scroll_offset((page - 1) as f32 * (row_height + 12.0))
+                .show_rows(ui, row_height + 12.0, total as usize, &mut draw_pages);
+        } else {
+            scroll_area.show_rows(ui, row_height + 12.0, total as usize, &mut draw_pages);
+        }
+        drop(draw_pages);
+
+        if let Some(page) = first_visible {
+            let reader = self.reader.as_ref().unwrap();
+            if page != reader.page && self.send(Task::Position(reader.path.clone(), page, false)) {
+                self.reader.as_mut().unwrap().page = page;
+            }
+        }
+        if let Some(page) = retry_page {
+            self.reader.as_mut().unwrap().failed.remove(&page);
+            requested_page = Some(page);
+        }
+        if let Some(page) = requested_page {
+            self.queue_continuous_page(page);
+        }
     }
 }
 fn texture(ctx: &egui::Context, name: &str, image: image::RgbaImage) -> TextureHandle {
@@ -1090,11 +1299,37 @@ mod tests {
             loading: false,
             zoom: 1.0,
             cache: VecDeque::new(),
+            pending_page: None,
+            failed: HashSet::new(),
+            scroll_to_page: None,
         });
         let _ = ctx.run(egui::RawInput::default(), |ctx| app.reader_ui(ctx));
         app.turn(999);
         assert_eq!(app.reader.as_ref().unwrap().page, 3);
         app.turn(0);
         assert_eq!(app.reader.as_ref().unwrap().page, 1);
+
+        app.state.continuous_scroll = true;
+        let reader = app.reader.as_mut().unwrap();
+        reader.total = 10_000;
+        reader.scroll_to_page = Some(1);
+        let result = ctx.run(
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    Vec2::new(360.0, 760.0),
+                )),
+                ..Default::default()
+            },
+            |ctx| app.reader_ui(ctx),
+        );
+        assert!(
+            result.shapes.len() < 500,
+            "Continuous reading should only create widgets for visible pages"
+        );
+        assert!(
+            app.reader.as_ref().unwrap().pending_page.is_some(),
+            "Visible pages should be queued for rendering"
+        );
     }
 }

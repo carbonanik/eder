@@ -39,6 +39,7 @@ pub struct Snapshot {
     pub favorites: Vec<PathBuf>,
     pub history: Vec<PathBuf>,
     pub dark: bool,
+    pub continuous_scroll: bool,
 }
 impl Store {
     pub fn open(path: &Path) -> Result<Self, String> {
@@ -69,6 +70,9 @@ impl Store {
     }
     pub fn dark(&self, dark: bool) -> Result<(), String> {
         self.set("dark", &[u8::from(dark)])
+    }
+    pub fn continuous_scroll(&self, continuous_scroll: bool) -> Result<(), String> {
+        self.set("continuous_scroll", &[u8::from(continuous_scroll)])
     }
     pub fn position(&self, p: &Path) -> Result<u32, String> {
         self.conn
@@ -131,6 +135,7 @@ impl Store {
         Ok(Snapshot {
             root: self.setting("root")?.map(decode),
             dark: self.setting("dark")? == Some(vec![1]),
+            continuous_scroll: self.setting("continuous_scroll")? == Some(vec![1]),
             favorites: paths("SELECT path FROM docs WHERE favorite=1")?,
             history: paths("SELECT path FROM docs WHERE opened IS NOT NULL ORDER BY opened DESC")?,
         })
@@ -158,12 +163,14 @@ mod tests {
             s.save_position(&a, 7).unwrap();
             s.save_position(&b, 0).unwrap();
             s.dark(true).unwrap();
+            s.continuous_scroll(true).unwrap();
             assert_eq!(s.snapshot().unwrap().history, [a.clone(), b.clone()]);
         }
         let mut s = Store::open(&db).unwrap();
         assert_eq!(s.position(&a).unwrap(), 7);
         assert_eq!(s.position(&b).unwrap(), 1);
         assert!(s.snapshot().unwrap().dark);
+        assert!(s.snapshot().unwrap().continuous_scroll);
         assert_eq!(s.take_pending().unwrap(), Some(a.clone()));
         assert_eq!(s.take_pending().unwrap(), None);
         s.remove_history(&a).unwrap();

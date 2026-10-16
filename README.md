@@ -39,13 +39,13 @@ The Rust source uses cross-platform APIs. Only Linux compilation and headless te
 - First-page previews generated only for visible rows, disk cached with file metadata invalidation.
 - Library, Currently Reading (MRU, no duplicates), and Favorites.
 - Missing quick-access items remain stored, visibly unavailable, and removable.
-- Page navigation, page jump, fit-to-window, zoom, and dark-page inversion.
+- Single-page and continuous-scroll reading modes, page navigation, page jump, fit-to-window, zoom, and dark-page inversion.
 - Per-document automatic position saving and explicit Save Position confirmation.
 - Interrupted-session recovery; graceful closes clear the recovery target.
 - Native OS window decorations and controls; compact navigation below 760 logical pixels.
 - Local SQLite transactions for preferences and reading state; failed writes produce visible errors.
 
-Reader keyboard controls: Left/Right or Page Up/Page Down, Home/End, Escape to return. Use scrollbars/trackpad to pan a zoomed page. Text selection, search, annotations, printing, and password entry are not implemented. Password-protected PDFs that require a password produce an error. Dark mode inverts document colors, including images.
+Choose **Settings → Reading Mode** to switch between **Single Page** and **Continuous Scroll**; the selection is saved locally. In continuous mode, visible pages load incrementally as you scroll. Reader keyboard controls: Left/Right or Page Up/Page Down, Home/End, Escape to return. Use scrollbars/trackpad to pan a zoomed page. Text selection, search, annotations, printing, and password entry are not implemented. Password-protected PDFs that require a password produce an error. Dark mode inverts document colors, including images.
 
 ## Performance design
 
