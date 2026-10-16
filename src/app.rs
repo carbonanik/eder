@@ -87,6 +87,7 @@ struct Reader {
     pending_page: Option<u32>,
     failed: HashSet<u32>,
     scroll_to_page: Option<u32>,
+    continuous_row_height: Option<f32>,
 }
 
 pub struct Folio {
@@ -522,6 +523,7 @@ impl Folio {
                             pending_page: None,
                             failed: HashSet::new(),
                             scroll_to_page: Some(page),
+                            continuous_row_height: None,
                         });
                         if self.state.continuous_scroll {
                             self.reader.as_mut().unwrap().loading = false;
@@ -1053,13 +1055,19 @@ impl Folio {
             (reader.total, reader.zoom)
         };
         let row_height = (ui.available_width() * 1.42 * zoom).max(300.0);
-        let initial_page = self
-            .reader
-            .as_mut()
-            .unwrap()
-            .scroll_to_page
-            .take()
-            .map(|page| page.clamp(1, total));
+        let row_stride = row_height + ui.spacing().item_spacing.y;
+        let reader = self.reader.as_mut().unwrap();
+        let previous_row_height = reader.continuous_row_height.replace(row_stride);
+        let scroll_to_page = reader.scroll_to_page.take();
+        let scroll_salt = ("continuous-pages", reader.path.clone());
+        let scroll_id = ui.make_persistent_id(egui::Id::new(scroll_salt.clone()));
+        let previous_offset =
+            egui::scroll_area::State::load(ui.ctx(), scroll_id).map(|state| state.offset.y);
+        let resized_offset = previous_row_height
+            .zip(previous_offset)
+            .filter(|(previous, _)| (*previous - row_stride).abs() > f32::EPSILON)
+            .map(|(previous, offset)| offset * row_stride / previous);
+        let initial_page = scroll_to_page.map(|page| page.clamp(1, total));
         let mut first_visible = None;
         let mut requested_page = None;
         let mut retry_page = None;
@@ -1103,21 +1111,24 @@ impl Folio {
                         }
                     },
                 );
-                ui.add_space(12.0);
             }
         };
         let scroll_area = egui::ScrollArea::vertical()
-            .id_salt((
-                "continuous-pages",
-                self.reader.as_ref().unwrap().path.clone(),
-            ))
+            .id_salt(scroll_salt)
             .auto_shrink([false, false]);
         if let Some(page) = initial_page {
             scroll_area
-                .vertical_scroll_offset((page - 1) as f32 * (row_height + 12.0))
-                .show_rows(ui, row_height + 12.0, total as usize, &mut draw_pages);
+                .vertical_scroll_offset((page - 1) as f32 * row_stride)
+                .show_rows(ui, row_height, total as usize, &mut draw_pages);
+        } else if let Some(offset) = resized_offset {
+            scroll_area.vertical_scroll_offset(offset).show_rows(
+                ui,
+                row_height,
+                total as usize,
+                &mut draw_pages,
+            );
         } else {
-            scroll_area.show_rows(ui, row_height + 12.0, total as usize, &mut draw_pages);
+            scroll_area.show_rows(ui, row_height, total as usize, &mut draw_pages);
         }
         drop(draw_pages);
 
@@ -1302,6 +1313,7 @@ mod tests {
             pending_page: None,
             failed: HashSet::new(),
             scroll_to_page: None,
+            continuous_row_height: None,
         });
         let _ = ctx.run(egui::RawInput::default(), |ctx| app.reader_ui(ctx));
         app.turn(999);
