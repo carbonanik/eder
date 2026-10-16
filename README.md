@@ -45,14 +45,14 @@ The Rust source uses cross-platform APIs. Only Linux compilation and headless te
 - Native OS window decorations and controls; compact navigation below 760 logical pixels.
 - Local SQLite transactions for preferences and reading state; failed writes produce visible errors.
 
-Choose **Settings → Reading Mode** to switch between **Single Page** and **Continuous Scroll**; the selection is saved locally. In continuous mode, visible pages load incrementally as you scroll. Reader keyboard controls: Left/Right or Page Up/Page Down, Home/End, Escape to return. Use scrollbars/trackpad to pan a zoomed page. Text selection, search, annotations, printing, and password entry are not implemented. Password-protected PDFs that require a password produce an error. Dark mode inverts document colors, including images.
+Choose **Settings → Reading Mode** to switch between **Single Page** and **Continuous Scroll**; the selection is saved locally. In continuous mode, visible pages load incrementally and up to two pages before and after the visible range are prefetched to reduce blank-page flicker while scrolling. Reader keyboard controls: Left/Right or Page Up/Page Down, Home/End, Escape to return. Use scrollbars/trackpad to pan a zoomed page. Text selection, search, annotations, printing, and password entry are not implemented. Password-protected PDFs that require a password produce an error. Dark mode inverts document colors, including images.
 
 ## Performance design
 
 | Resource | Policy |
 | --- | --- |
 | Library UI | Virtualized rows; only visible rows produce widgets and request previews |
-| Page cache | LRU texture handles; 48 MiB of retained uncompressed RGBA page data |
+| Page cache | LRU texture handles; 128 MiB of retained uncompressed RGBA page data |
 | Preview cache in memory | At most 64 entries, each at most 192 × 192 pixels (~9 MiB maximum pixel payload) |
 | Preview cache on disk | 128 MiB budget, oldest writes evicted; a transient extra file may exist during insertion |
 | Page raster | Longest edge capped at 2,400 pixels; no full-document rasterization |

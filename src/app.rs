@@ -85,6 +85,7 @@ struct Reader {
     zoom: f32,
     cache: VecDeque<(u32, bool, TextureHandle)>,
     pending_page: Option<u32>,
+    queued_pages: VecDeque<u32>,
     failed: HashSet<u32>,
     scroll_to_page: Option<u32>,
     continuous_row_height: Option<f32>,
@@ -444,18 +445,49 @@ impl Folio {
             }
         }
     }
-    fn queue_continuous_page(&mut self, page: u32) {
-        let id = self.page_gen.load(Ordering::Acquire);
-        if let Some(reader) = &mut self.reader {
-            if reader.pending_page.is_some()
+    fn queue_continuous_pages(&mut self, visible: &[u32]) {
+        let Some(reader) = &mut self.reader else {
+            return;
+        };
+        let Some(first) = visible.iter().copied().min() else {
+            return;
+        };
+        let last = visible.iter().copied().max().unwrap();
+        let mut requested = visible.to_vec();
+        for distance in 1..=2 {
+            if first > distance {
+                requested.push(first - distance);
+            }
+            if last.saturating_add(distance) <= reader.total {
+                requested.push(last + distance);
+            }
+        }
+        let desired: HashSet<_> = requested.iter().copied().collect();
+        reader.queued_pages.retain(|page| desired.contains(page));
+        for page in requested {
+            if reader.pending_page == Some(page)
+                || reader.queued_pages.contains(&page)
                 || reader.failed.contains(&page)
                 || reader
                     .cache
                     .iter()
                     .any(|(cached_page, dark, _)| *cached_page == page && *dark == self.state.dark)
             {
+                continue;
+            }
+            reader.queued_pages.push_back(page);
+        }
+        self.dispatch_continuous_page();
+    }
+    fn dispatch_continuous_page(&mut self) {
+        let id = self.page_gen.load(Ordering::Acquire);
+        if let Some(reader) = &mut self.reader {
+            if reader.pending_page.is_some() {
                 return;
             }
+            let Some(page) = reader.queued_pages.pop_front() else {
+                return;
+            };
             reader.pending_page = Some(page);
             *self.pages.0.lock().unwrap() = Some(PageJob {
                 path: reader.path.clone(),
@@ -521,6 +553,7 @@ impl Folio {
                             zoom: 1.0,
                             cache: VecDeque::new(),
                             pending_page: None,
+                            queued_pages: VecDeque::new(),
                             failed: HashSet::new(),
                             scroll_to_page: Some(page),
                             continuous_row_height: None,
@@ -547,6 +580,7 @@ impl Folio {
                         self.page_gen.fetch_add(1, Ordering::AcqRel);
                         if let Some(reader) = &mut self.reader {
                             reader.pending_page = None;
+                            reader.queued_pages.clear();
                         }
                     } else {
                         self.render();
@@ -584,7 +618,7 @@ impl Folio {
                                 .iter()
                                 .map(|(_, _, t)| t.size()[0] * t.size()[1] * 4)
                                 .sum::<usize>()
-                                > 48 * 1024 * 1024
+                                > 128 * 1024 * 1024
                             {
                                 r.cache.pop_front();
                             }
@@ -600,6 +634,7 @@ impl Folio {
                 }
             }
         }
+        self.dispatch_continuous_page();
         while let Ok(result) = self.thumb_rx.try_recv() {
             if result.id == self.thumb_gen.load(Ordering::Acquire) {
                 self.pending.remove(&result.path);
@@ -1069,13 +1104,14 @@ impl Folio {
             .map(|(previous, offset)| offset * row_stride / previous);
         let initial_page = scroll_to_page.map(|page| page.clamp(1, total));
         let mut first_visible = None;
-        let mut requested_page = None;
+        let mut visible_pages = Vec::new();
         let mut retry_page = None;
         let mut draw_pages = |ui: &mut egui::Ui, range: std::ops::Range<usize>| {
             first_visible = range
                 .start
                 .checked_add(1)
                 .map(|page| (page as u32).min(total));
+            visible_pages.extend(range.clone().map(|index| index as u32 + 1));
             for index in range {
                 let page = index as u32 + 1;
                 let reader = self.reader.as_ref().unwrap();
@@ -1085,9 +1121,6 @@ impl Folio {
                     .find(|(cached_page, dark, _)| *cached_page == page && *dark == self.state.dark)
                     .map(|(_, _, texture)| texture.clone());
                 let failed = reader.failed.contains(&page);
-                if texture.is_none() && !failed && requested_page.is_none() {
-                    requested_page = Some(page);
-                }
                 ui.allocate_ui_with_layout(
                     Vec2::new(ui.available_width(), row_height),
                     egui::Layout::top_down(egui::Align::Center),
@@ -1140,11 +1173,9 @@ impl Folio {
         }
         if let Some(page) = retry_page {
             self.reader.as_mut().unwrap().failed.remove(&page);
-            requested_page = Some(page);
+            visible_pages.push(page);
         }
-        if let Some(page) = requested_page {
-            self.queue_continuous_page(page);
-        }
+        self.queue_continuous_pages(&visible_pages);
     }
 }
 fn texture(ctx: &egui::Context, name: &str, image: image::RgbaImage) -> TextureHandle {
@@ -1311,6 +1342,7 @@ mod tests {
             zoom: 1.0,
             cache: VecDeque::new(),
             pending_page: None,
+            queued_pages: VecDeque::new(),
             failed: HashSet::new(),
             scroll_to_page: None,
             continuous_row_height: None,
@@ -1342,6 +1374,19 @@ mod tests {
         assert!(
             app.reader.as_ref().unwrap().pending_page.is_some(),
             "Visible pages should be queued for rendering"
+        );
+        assert!(
+            app.reader.as_ref().unwrap().queued_pages.contains(&3),
+            "Pages ahead of the visible range should be prefetched"
+        );
+        app.queue_continuous_pages(&[5_000]);
+        assert!(
+            app.reader.as_ref().unwrap().queued_pages.contains(&4_998),
+            "Pages behind the visible range should be prefetched"
+        );
+        assert!(
+            app.reader.as_ref().unwrap().queued_pages.contains(&5_002),
+            "Pages ahead of the visible range should be prefetched"
         );
     }
 }
