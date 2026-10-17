@@ -762,6 +762,189 @@ impl Folio {
             "PDF rendering requires Poppler (pdfinfo + pdftoppm). See the included setup guide.",
         );
     }
+    // Keep the grid responsive and virtualize rows rather than individual documents.
+    fn grid_columns(width: f32) -> usize {
+        const MIN_TILE_WIDTH: f32 = 176.0;
+        const GAP: f32 = 14.0;
+        ((width + GAP) / (MIN_TILE_WIDTH + GAP)).floor().max(1.0) as usize
+    }
+
+    fn document_tile(&mut self, ui: &mut egui::Ui, e: &Entry, width: f32) {
+        const TILE_HEIGHT: f32 = 266.0;
+        const PREVIEW_HEIGHT: f32 = 154.0;
+        const PADDING: f32 = 12.0;
+
+        if !e.directory && e.available {
+            if self.textures.contains_key(&e.path) {
+                self.touch(&e.path);
+            } else if !self.pending.contains(&e.path)
+                && self
+                    .thumb_tx
+                    .try_send(ThumbJob {
+                        path: e.path.clone(),
+                        id: self.thumb_gen.load(Ordering::Acquire),
+                    })
+                    .is_ok()
+            {
+                self.pending.insert(e.path.clone());
+            }
+        }
+
+        ui.allocate_ui_with_layout(
+            Vec2::new(width, TILE_HEIGHT),
+            egui::Layout::top_down(egui::Align::Min),
+            |ui| {
+                ui.set_width(width);
+                ui.set_min_height(TILE_HEIGHT);
+                egui::Frame::none()
+                    .fill(Color32::WHITE)
+                    .rounding(12.0)
+                    .inner_margin(PADDING)
+                    .show(ui, |ui| {
+                        ui.spacing_mut().item_spacing.y = 5.0;
+                        let content_width = (width - 2.0 * PADDING).max(48.0);
+                        ui.set_width(content_width);
+
+                        let (rect, response) = ui.allocate_exact_size(
+                            Vec2::new(content_width, PREVIEW_HEIGHT),
+                            if e.available {
+                                egui::Sense::click()
+                            } else {
+                                egui::Sense::hover()
+                            },
+                        );
+                        ui.painter().rect_filled(
+                            rect,
+                            8.0,
+                            if response.hovered() && e.available {
+                                Color32::from_rgb(232, 242, 238)
+                            } else {
+                                Color32::from_rgb(241, 245, 244)
+                            },
+                        );
+
+                        if e.directory {
+                            // A folder illustration takes the place of a PDF cover.
+                            let center = rect.center();
+                            ui.painter().rect_filled(
+                                egui::Rect::from_min_size(
+                                    center - Vec2::new(36.0, 25.0),
+                                    Vec2::new(36.0, 14.0),
+                                ),
+                                4.0,
+                                Color32::from_rgb(34, 129, 111),
+                            );
+                            ui.painter().rect_filled(
+                                egui::Rect::from_min_size(
+                                    center - Vec2::new(36.0, 14.0),
+                                    Vec2::new(72.0, 52.0),
+                                ),
+                                7.0,
+                                Color32::from_rgb(177, 221, 207),
+                            );
+                        } else if let Some(Some(texture)) = self.textures.get(&e.path) {
+                            let size = texture.size_vec2();
+                            let scale = ((rect.width() - 16.0) / size.x)
+                                .min((rect.height() - 12.0) / size.y)
+                                .min(1.0);
+                            let image_rect = egui::Rect::from_center_size(rect.center(), size * scale);
+                            ui.painter().image(
+                                texture.id(),
+                                image_rect,
+                                egui::Rect::from_min_max(egui::Pos2::ZERO, egui::pos2(1.0, 1.0)),
+                                Color32::WHITE,
+                            );
+                        } else {
+                            let paper = egui::Rect::from_center_size(
+                                rect.center(),
+                                Vec2::new(85.0, 112.0),
+                            );
+                            ui.painter().rect_filled(paper, 5.0, Color32::WHITE);
+                            ui.painter().text(
+                                paper.center(),
+                                egui::Align2::CENTER_CENTER,
+                                "PDF",
+                                egui::FontId::proportional(19.0),
+                                Color32::from_rgb(31, 120, 101),
+                            );
+                        }
+
+                        if response.on_hover_text(e.path.display().to_string()).clicked() {
+                            if e.directory {
+                                self.folder = Some(e.path.clone());
+                                self.load();
+                            } else {
+                                self.open(e.path.clone(), false);
+                            }
+                        }
+
+                        let label = egui::Button::new(RichText::new(&e.name).strong())
+                            .frame(false)
+                            .truncate();
+                        if ui
+                            .add_sized([content_width, 26.0], label)
+                            .on_hover_text(e.path.display().to_string())
+                            .clicked()
+                            && e.available
+                        {
+                            if e.directory {
+                                self.folder = Some(e.path.clone());
+                                self.load();
+                            } else {
+                                self.open(e.path.clone(), false);
+                            }
+                        }
+
+                        ui.vertical_centered(|ui| {
+                            ui.label(
+                                RichText::new(if e.directory {
+                                    "FOLDER"
+                                } else if !e.available {
+                                    "UNAVAILABLE"
+                                } else {
+                                    "PDF DOCUMENT"
+                                })
+                                .small()
+                                .color(if !e.available {
+                                    Color32::DARK_RED
+                                } else {
+                                    Color32::GRAY
+                                }),
+                            );
+                        });
+
+                        if !e.directory {
+                            let favored = self.favorite_set.contains(&e.path);
+                            ui.horizontal(|ui| {
+                                ui.spacing_mut().item_spacing.x = 5.0;
+                                let remove_width = if self.view == View::Reading { 34.0 } else { 0.0 };
+                                let favorite_width = (content_width - remove_width
+                                    - if remove_width > 0.0 { 5.0 } else { 0.0 })
+                                    .max(24.0);
+                                if ui
+                                    .add_sized(
+                                        [favorite_width, 26.0],
+                                        egui::Button::new(if favored { "★ Saved" } else { "☆ Favorite" }),
+                                    )
+                                    .clicked()
+                                {
+                                    self.send(Task::Favorite(e.path.clone(), !favored));
+                                }
+                                if self.view == View::Reading
+                                    && ui
+                                        .add_sized([remove_width, 26.0], egui::Button::new("✕"))
+                                        .on_hover_text("Remove from Currently Reading (PDF stays on disk)")
+                                        .clicked()
+                                {
+                                    self.send(Task::Remove(e.path.clone()));
+                                }
+                            });
+                        }
+                    });
+            },
+        );
+    }
+
     fn browser(&mut self, ui: &mut egui::Ui) {
         ui.horizontal_wrapped(|ui| {
             ui.heading(self.view.title());
@@ -814,147 +997,35 @@ impl Folio {
         if self.entries.is_empty() {
             ui.label(match self.view {
                 View::Library => "No PDFs or subfolders were found.",
-                View::Favorites => {
-                    "No favorites yet. Select Favorite beside a PDF to keep it here."
-                }
+                View::Favorites => "No favorites yet. Select Favorite beside a PDF to keep it here.",
                 _ => "PDFs you open appear in Currently Reading.",
             });
             return;
         }
-        let total = self.entries.len();
+
+        const GAP: f32 = 14.0;
+        const ROW_HEIGHT: f32 = 280.0;
+        // Reserve scrollbar room so a column never gets clipped on compact windows.
+        let available = (ui.available_width() - 18.0).max(1.0);
+        let columns = Self::grid_columns(available);
+        let tile_width = ((available - GAP * (columns - 1) as f32) / columns as f32).max(48.0);
+        let rows = self.entries.len().div_ceil(columns);
+
         egui::ScrollArea::vertical()
-            .id_salt(("library", self.listing))
+            .id_salt(("library-grid", self.listing))
             .auto_shrink([false, false])
-            .show_rows(ui, 100.0, total, |ui, range| {
-                for index in range {
-                    let Some(e) = self.entries.get(index).cloned() else {
-                        break;
-                    };
-                    ui.push_id(&e.path, |ui| {
-                        egui::Frame::none()
-                            .fill(Color32::WHITE)
-                            .rounding(10.0)
-                            .inner_margin(10.0)
-                            .show(ui, |ui| {
-                                ui.set_min_height(78.0);
-                                ui.horizontal(|ui| {
-                                    if !e.directory && e.available {
-                                        if self.textures.contains_key(&e.path) {
-                                            self.touch(&e.path);
-                                        } else if !self.pending.contains(&e.path)
-                                            && self
-                                                .thumb_tx
-                                                .try_send(ThumbJob {
-                                                    path: e.path.clone(),
-                                                    id: self.thumb_gen.load(Ordering::Acquire),
-                                                })
-                                                .is_ok()
-                                        {
-                                            self.pending.insert(e.path.clone());
-                                        }
-                                    }
-                                    ui.allocate_ui(Vec2::new(56.0, 78.0), |ui| {
-                                        if let Some(Some(t)) = self.textures.get(&e.path) {
-                                            ui.add(
-                                                egui::Image::new(t)
-                                                    .fit_to_exact_size(Vec2::new(52.0, 72.0))
-                                                    .maintain_aspect_ratio(true),
-                                            );
-                                        } else {
-                                            let (rect, _) = ui.allocate_exact_size(
-                                                Vec2::new(52.0, 72.0),
-                                                egui::Sense::hover(),
-                                            );
-                                            let ink = Color32::from_rgb(29, 115, 99);
-                                            if e.directory {
-                                                let base = rect.min + Vec2::new(2.0, 22.0);
-                                                ui.painter().rect_filled(
-                                                    egui::Rect::from_min_size(
-                                                        base - Vec2::new(0.0, 6.0),
-                                                        Vec2::new(22.0, 12.0),
-                                                    ),
-                                                    3.0,
-                                                    ink,
-                                                );
-                                                ui.painter().rect_filled(
-                                                    egui::Rect::from_min_size(
-                                                        base,
-                                                        Vec2::new(48.0, 34.0),
-                                                    ),
-                                                    4.0,
-                                                    Color32::from_rgb(201, 226, 219),
-                                                );
-                                            } else {
-                                                ui.painter().rect_filled(
-                                                    rect.shrink(3.0),
-                                                    4.0,
-                                                    Color32::from_rgb(233, 240, 237),
-                                                );
-                                                ui.painter().text(
-                                                    rect.center(),
-                                                    egui::Align2::CENTER_CENTER,
-                                                    "PDF",
-                                                    egui::FontId::proportional(16.0),
-                                                    ink,
-                                                );
-                                            }
-                                        }
-                                    });
-                                    ui.vertical(|ui| {
-                                        ui.set_max_width((ui.available_width() - 10.0).max(100.0));
-                                        let button =
-                                            egui::Button::new(RichText::new(&e.name).strong())
-                                                .frame(false)
-                                                .truncate();
-                                        if ui
-                                            .add_enabled(e.available, button)
-                                            .on_hover_text(e.path.display().to_string())
-                                            .clicked()
-                                        {
-                                            if e.directory {
-                                                self.folder = Some(e.path.clone());
-                                                self.load();
-                                            } else {
-                                                self.open(e.path.clone(), false);
-                                            }
-                                        }
-                                        if !e.available {
-                                            ui.label(
-                                                RichText::new(
-                                                    "Unavailable — moved, deleted, or inaccessible",
-                                                )
-                                                .small()
-                                                .color(Color32::DARK_RED),
-                                            );
-                                        }
-                                        ui.horizontal_wrapped(|ui| {
-                                            if e.directory {
-                                                ui.label("Folder");
-                                            } else {
-                                                let favored = self.favorite_set.contains(&e.path);
-                                                if ui
-                                                    .small_button(if favored {
-                                                        "Unfavorite"
-                                                    } else {
-                                                        "Favorite"
-                                                    })
-                                                    .clicked()
-                                                {
-                                                    self.send(Task::Favorite(
-                                                        e.path.clone(),
-                                                        !favored,
-                                                    ));
-                                                }
-                                                if self.view == View::Reading
-                                                    && ui.small_button("Remove from list").clicked()
-                                                {
-                                                    self.send(Task::Remove(e.path.clone()));
-                                                }
-                                            }
-                                        });
-                                    });
+            .show_rows(ui, ROW_HEIGHT, rows, |ui, visible_rows| {
+                for row_index in visible_rows {
+                    ui.horizontal(|ui| {
+                        ui.spacing_mut().item_spacing.x = GAP;
+                        for col in 0..columns {
+                            let index = row_index * columns + col;
+                            if let Some(entry) = self.entries.get(index).cloned() {
+                                ui.push_id(&entry.path, |ui| {
+                                    self.document_tile(ui, &entry, tile_width);
                                 });
-                            });
+                            }
+                        }
                     });
                 }
             });
@@ -1265,6 +1336,13 @@ impl eframe::App for Folio {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn grid_columns_adapt_to_window_size() {
+        assert_eq!(Folio::grid_columns(280.0), 1);
+        assert_eq!(Folio::grid_columns(390.0), 2);
+        assert_eq!(Folio::grid_columns(850.0), 4);
+    }
+
     #[test]
     fn compact_and_wide_layouts_virtualize_large_libraries() {
         let ctx = egui::Context::default();
