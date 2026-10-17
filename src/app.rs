@@ -2,7 +2,7 @@ use eframe::egui::{self, Color32, RichText, TextureHandle, Vec2};
 use folio_reader::{
     library::{self, Entry},
     render,
-    store::{Snapshot, Store},
+    store::{ReadingPosition, Snapshot, Store},
 };
 use std::{
     collections::{HashMap, HashSet, VecDeque},
@@ -38,7 +38,7 @@ enum Task {
     Favorite(PathBuf, bool),
     Remove(PathBuf),
     Open(PathBuf, bool, u64),
-    Position(PathBuf, u32, bool),
+    Position(PathBuf, ReadingPosition, bool),
     Dark(bool),
     ReadingMode(bool),
     Close,
@@ -47,7 +47,7 @@ enum Task {
 enum Event {
     Snapshot(Snapshot),
     Rows(u64, Result<Vec<Entry>, String>),
-    Open(PathBuf, u32, u32, u64),
+    Open(PathBuf, ReadingPosition, u32, u64),
     Recovery(PathBuf),
     Notice(String),
     Error(String),
@@ -117,8 +117,14 @@ struct Reader {
     pending_page: Option<u32>,
     queued_pages: VecDeque<u32>,
     failed: HashSet<u32>,
-    scroll_to_page: Option<u32>,
+    scroll_to: Option<ReadingPosition>,
+    scroll_fraction: f32,
     continuous_row_height: Option<f32>,
+}
+impl Reader {
+    fn reading_position(&self, continuous: bool) -> ReadingPosition {
+        ReadingPosition::new(self.page, if continuous { self.scroll_fraction } else { 0.0 })
+    }
 }
 
 pub struct Folio {
@@ -232,15 +238,22 @@ fn data_worker(
                     if open_gen.load(Ordering::Acquire) != id {
                         return Ok(());
                     }
-                    let page = store.position(&p)?.clamp(1, total);
+                    let saved = store.reading_position(&p)?;
+                    let position = ReadingPosition::new(saved.page.clamp(1, total), saved.fraction);
                     store.opened(&p, recovery)?;
-                    store.save_position(&p, page)?;
-                    send(Event::Open(p, page, total, id));
+                    // Do not overwrite the scroll fraction on open: this must survive
+                    // until the first restored viewport frame is shown.
+                    send(Event::Open(p, position, total, id));
                 }
-                Task::Position(p, page, explicit) => {
-                    store.save_position(&p, page)?;
+                Task::Position(p, position, explicit) => {
+                    store.save_reading_position(&p, position)?;
                     if explicit {
-                        send(Event::Notice(format!("Position saved: page {page}.")));
+                        let suffix = if position.fraction > 0.001 {
+                            format!(" ({:.0}% through page)", position.fraction * 100.0)
+                        } else {
+                            String::new()
+                        };
+                        send(Event::Notice(format!("Position saved: page {}{suffix}.", position.page)));
                     }
                     return Ok(());
                 }
@@ -540,10 +553,26 @@ impl Folio {
         });
         self.pages.1.notify_one();
     }
+    // Explicit page navigation starts at the beginning of that page.
     fn position_changed(&mut self, page: u32) {
         if let Some(reader) = &mut self.reader {
-            if page != reader.page {
+            if page != reader.page || reader.scroll_fraction > 0.000_1 {
                 reader.page = page;
+                reader.scroll_fraction = 0.0;
+                reader.position_changed_at = Some(Instant::now());
+            }
+        }
+    }
+    // Track the actual scroll offset, not just the first visible page.
+    // Normalizing to a page fraction also survives viewport/zoom changes.
+    fn continuous_position_changed(&mut self, offset: f32, row_stride: f32) {
+        if let Some(reader) = &mut self.reader {
+            let position = ReadingPosition::from_scroll_offset(offset, row_stride, reader.total);
+            if position.page != reader.page
+                || (position.fraction - reader.scroll_fraction).abs() > 0.000_1
+            {
+                reader.page = position.page;
+                reader.scroll_fraction = position.fraction;
                 reader.position_changed_at = Some(Instant::now());
             }
         }
@@ -551,12 +580,12 @@ impl Folio {
     fn flush_position_if_idle(&mut self, ctx: &egui::Context) {
         let pending = self.reader.as_ref().and_then(|reader| {
             reader.position_changed_at.map(|changed| (
-                reader.path.clone(), reader.page, changed,
+                reader.path.clone(), reader.reading_position(self.state.continuous_scroll), changed,
             ))
         });
-        if let Some((path, page, changed)) = pending {
+        if let Some((path, position, changed)) = pending {
             if changed.elapsed() >= POSITION_SAVE_DELAY {
-                if self.send(Task::Position(path, page, false)) {
+                if self.send(Task::Position(path, position, false)) {
                     if let Some(reader) = &mut self.reader {
                         reader.position_changed_at = None;
                     }
@@ -569,10 +598,12 @@ impl Folio {
     fn turn(&mut self, page: u32) {
         let Some(r) = &self.reader else { return };
         let page = page.clamp(1, r.total);
-        if page == r.page { return; }
+        if page == r.page && (!self.state.continuous_scroll || r.scroll_fraction < 0.000_1) {
+            return;
+        }
         self.position_changed(page);
         if self.state.continuous_scroll {
-            self.reader.as_mut().unwrap().scroll_to_page = Some(page);
+            self.reader.as_mut().unwrap().scroll_to = Some(ReadingPosition::new(page, 0.0));
         } else {
             self.render();
         }
@@ -640,7 +671,9 @@ impl Folio {
     }
     fn back(&mut self) {
         if let Some(r) = &self.reader {
-            if !self.send(Task::Position(r.path.clone(), r.page, false)) {
+            if !self.send(Task::Position(
+                r.path.clone(), r.reading_position(self.state.continuous_scroll), false,
+            )) {
                 return;
             }
             if !self.send(Task::Close) {
@@ -682,14 +715,14 @@ impl Folio {
                         }
                     }
                 }
-                Event::Open(path, page, total, id) => {
+                Event::Open(path, position, total, id) => {
                     if id == self.open_gen.load(Ordering::Acquire) {
                         self.opening = false;
                         self.page_gen.fetch_add(1, Ordering::AcqRel);
                         self.link_gen.fetch_add(1, Ordering::AcqRel);
                         self.reader = Some(Reader {
                             path,
-                            page,
+                            page: position.page,
                             total,
                             texture: None,
                             loading: true,
@@ -703,7 +736,8 @@ impl Folio {
                             pending_page: None,
                             queued_pages: VecDeque::new(),
                             failed: HashSet::new(),
-                            scroll_to_page: Some(page),
+                            scroll_to: Some(position),
+                            scroll_fraction: position.fraction,
                             continuous_row_height: None,
                         });
                         if self.state.continuous_scroll {
@@ -1221,9 +1255,10 @@ impl Folio {
             if self.reader.is_none() {
                 return;
             }
-            let (page, total, path) = {
+            let (page, total, path, position) = {
                 let r = self.reader.as_ref().unwrap();
-                (r.page, r.total, r.path.clone())
+                (r.page, r.total, r.path.clone(),
+                    r.reading_position(self.state.continuous_scroll))
             };
             ui.horizontal_wrapped(|ui| {
                 if ui
@@ -1248,7 +1283,7 @@ impl Folio {
                     self.turn(page + 1);
                 }
                 if ui.button("Save Position").clicked() {
-                    if self.send(Task::Position(path, page, true)) {
+                    if self.send(Task::Position(path, position, true)) {
                         if let Some(r) = &mut self.reader { r.position_changed_at = None; }
                     }
                 }
@@ -1356,7 +1391,7 @@ impl Folio {
         let row_stride = row_height + ui.spacing().item_spacing.y;
         let reader = self.reader.as_mut().unwrap();
         let previous_row_height = reader.continuous_row_height.replace(row_stride);
-        let scroll_to_page = reader.scroll_to_page.take();
+        let scroll_to = reader.scroll_to.take();
         let scroll_salt = ("continuous-pages", reader.path.clone());
         let scroll_id = ui.make_persistent_id(egui::Id::new(scroll_salt.clone()));
         let previous_offset =
@@ -1365,16 +1400,12 @@ impl Folio {
             .zip(previous_offset)
             .filter(|(previous, _)| (*previous - row_stride).abs() > f32::EPSILON)
             .map(|(previous, offset)| offset * row_stride / previous);
-        let initial_page = scroll_to_page.map(|page| page.clamp(1, total));
-        let mut first_visible = None;
+        let initial_anchor = scroll_to.map(|anchor|
+            ReadingPosition::new(anchor.page.clamp(1, total), anchor.fraction));
         let mut visible_pages = Vec::new();
         let mut retry_page = None;
         let mut internal_jump = None;
         let mut draw_pages = |ui: &mut egui::Ui, range: std::ops::Range<usize>| {
-            first_visible = range
-                .start
-                .checked_add(1)
-                .map(|page| (page as u32).min(total));
             visible_pages.extend(range.clone().map(|index| index as u32 + 1));
             for index in range {
                 let page = index as u32 + 1;
@@ -1417,25 +1448,22 @@ impl Folio {
         let scroll_area = egui::ScrollArea::vertical()
             .id_salt(scroll_salt)
             .auto_shrink([false, false]);
-        if let Some(page) = initial_page {
+        let result = if let Some(anchor) = initial_anchor {
+            // Restore the exact viewport location, including a partial page.
             scroll_area
-                .vertical_scroll_offset((page - 1) as f32 * row_stride)
-                .show_rows(ui, row_height, total as usize, &mut draw_pages);
+                .vertical_scroll_offset(anchor.scroll_offset(row_stride))
+                .show_rows(ui, row_height, total as usize, &mut draw_pages)
         } else if let Some(offset) = resized_offset {
             scroll_area.vertical_scroll_offset(offset).show_rows(
-                ui,
-                row_height,
-                total as usize,
-                &mut draw_pages,
-            );
+                ui, row_height, total as usize, &mut draw_pages,
+            )
         } else {
-            scroll_area.show_rows(ui, row_height, total as usize, &mut draw_pages);
-        }
+            scroll_area.show_rows(ui, row_height, total as usize, &mut draw_pages)
+        };
+        let actual_offset = result.state.offset.y;
         drop(draw_pages);
 
-        if let Some(page) = first_visible {
-            self.position_changed(page);
-        }
+        self.continuous_position_changed(actual_offset, row_stride);
         if let Some(page) = retry_page {
             self.reader.as_mut().unwrap().failed.remove(&page);
             visible_pages.push(page);
@@ -1518,7 +1546,9 @@ impl eframe::App for Folio {
             ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
             if !self.closing {
                 let save = if let Some(r) = &self.reader {
-                    self.send(Task::Position(r.path.clone(), r.page, false))
+                    self.send(Task::Position(
+                        r.path.clone(), r.reading_position(self.state.continuous_scroll), false,
+                    ))
                 } else {
                     true
                 };
@@ -1690,7 +1720,8 @@ mod tests {
             pending_page: None,
             queued_pages: VecDeque::new(),
             failed: HashSet::new(),
-            scroll_to_page: None,
+            scroll_to: None,
+            scroll_fraction: 0.0,
             continuous_row_height: None,
         });
         let _ = ctx.run(egui::RawInput::default(), |ctx| app.reader_ui(ctx));
@@ -1702,9 +1733,24 @@ mod tests {
         assert!(_tasks.try_recv().is_err(), "Normal navigation must not write a position per page");
 
         app.state.continuous_scroll = true;
+        app.reader.as_mut().unwrap().total = 20;
+        app.continuous_position_changed(5.4 * 850.0, 850.0);
+        let saved = app.reader.as_ref().unwrap().reading_position(true);
+        assert_eq!(saved.page, 6);
+        assert!((saved.fraction - 0.4).abs() < 0.001);
+        // Exact same reading point at a different viewport row height.
+        let restored = ReadingPosition::from_scroll_offset(saved.scroll_offset(1250.0), 1250.0, 20);
+        assert_eq!(restored.page, 6);
+        assert!((restored.fraction - saved.fraction).abs() < 0.001);
+        app.turn(8);
+        assert_eq!(app.reader.as_ref().unwrap().reading_position(true),
+            ReadingPosition::new(8, 0.0));
+        assert_eq!(app.reader.as_ref().unwrap().scroll_to,
+            Some(ReadingPosition::new(8, 0.0)));
+
         let reader = app.reader.as_mut().unwrap();
         reader.total = 10_000;
-        reader.scroll_to_page = Some(1);
+        reader.scroll_to = Some(ReadingPosition::new(1, 0.0));
         let result = ctx.run(
             egui::RawInput {
                 screen_rect: Some(egui::Rect::from_min_size(
