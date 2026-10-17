@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=Folio — PDF Library
+Comment=Browse and read a local PDF library
+Exec=folio-reader
+Icon=folio-reader
+Terminal=false
+Categories=Office;Viewer;

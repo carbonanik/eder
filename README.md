@@ -26,6 +26,16 @@ cargo build --locked --release -j 2
 ./target/release/folio-reader
 ```
 
+## Build an AppImage
+
+Install the Linux build dependencies above and `appimagetool`, then run:
+
+```sh
+./packaging/appimage/build.sh
+```
+
+The AppImage is written to `target/appimage/`. Poppler and the host's desktop graphics libraries remain runtime dependencies; Poppler is not bundled.
+
 macOS: install Xcode command-line tools, Rust, and Poppler (`brew install poppler`), then `cargo run --locked --release`.
 
 Windows: install Rust's MSVC toolchain and Visual Studio C++ build tools. Install a trusted Poppler build and put its `bin` directory on PATH, or set `FOLIO_POPPLER_DIR` to that directory. Run `cargo build --locked --release`; the program is `target\release\folio-reader.exe`.
