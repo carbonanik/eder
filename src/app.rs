@@ -62,6 +62,184 @@ enum Event {
 const PAGE_CACHE_BUDGET: usize = 160 * 1024 * 1024;
 const POSITION_SAVE_DELAY: Duration = Duration::from_millis(650);
 
+#[derive(Clone, Copy)]
+enum UiIcon {
+    Library,
+    Clock,
+    Heart,
+    Settings,
+    Search,
+    Grid,
+    List,
+    Refresh,
+    Home,
+    ChevronRight,
+    ArrowLeft,
+    Plus,
+    Star,
+    Close,
+    Folder,
+}
+
+fn paint_icon(painter: &egui::Painter, rect: egui::Rect, icon: UiIcon, color: Color32) {
+    let center = rect.center();
+    let half = rect.width().min(rect.height()) * 0.34;
+    let stroke = egui::Stroke::new(1.8_f32, color);
+    let point = |x: f32, y: f32| center + Vec2::new(x * half, y * half);
+    let line = |a, b| painter.line_segment([a, b], stroke);
+    match icon {
+        UiIcon::Library => {
+            let page = egui::Rect::from_center_size(center, Vec2::new(half * 1.65, half * 2.0));
+            painter.rect_stroke(page, 1.5, stroke);
+            line(point(-0.4, -0.35), point(0.4, -0.35));
+            line(point(-0.4, 0.05), point(0.4, 0.05));
+            line(point(-0.4, 0.45), point(0.2, 0.45));
+        }
+        UiIcon::Clock => {
+            painter.circle_stroke(center, half * 0.9, stroke);
+            line(center, point(0.0, -0.55));
+            line(center, point(0.45, 0.0));
+        }
+        UiIcon::Heart => {
+            let points = [
+                point(0.0, 0.8), point(-0.85, 0.0), point(-0.85, -0.45),
+                point(-0.55, -0.8), point(-0.2, -0.8), point(0.0, -0.5),
+                point(0.2, -0.8), point(0.55, -0.8), point(0.85, -0.45),
+                point(0.85, 0.0), point(0.0, 0.8),
+            ];
+            for segment in points.windows(2) {
+                line(segment[0], segment[1]);
+            }
+        }
+        UiIcon::Settings => {
+            painter.circle_stroke(center, half * 0.72, stroke);
+            painter.circle_stroke(center, half * 0.25, stroke);
+            for angle in 0..8 {
+                let angle = angle as f32 * std::f32::consts::TAU / 8.0;
+                let direction = Vec2::new(angle.cos(), angle.sin());
+                line(center + direction * half * 0.78, center + direction * half);
+            }
+        }
+        UiIcon::Search => {
+            painter.circle_stroke(center - Vec2::new(half * 0.18, half * 0.18), half * 0.58, stroke);
+            line(point(0.25, 0.25), point(0.8, 0.8));
+        }
+        UiIcon::Grid => {
+            let cell = half * 0.72;
+            for x in [-0.48, 0.48] {
+                for y in [-0.48, 0.48] {
+                    painter.rect_stroke(
+                        egui::Rect::from_center_size(point(x, y), Vec2::splat(cell)),
+                        1.5,
+                        stroke,
+                    );
+                }
+            }
+        }
+        UiIcon::List => {
+            for y in [-0.55, 0.0, 0.55] {
+                painter.circle_filled(point(-0.72, y), half * 0.09, color);
+                line(point(-0.4, y), point(0.75, y));
+            }
+        }
+        UiIcon::Refresh => {
+            let points = std::array::from_fn::<_, 17, _>(|step| {
+                let angle = 0.8 + step as f32 * (std::f32::consts::TAU - 1.6) / 16.0;
+                point(angle.cos() * 0.78, angle.sin() * 0.78)
+            });
+            for segment in points.windows(2) {
+                line(segment[0], segment[1]);
+            }
+            line(point(0.63, -0.52), point(0.78, -0.55));
+            line(point(0.78, -0.55), point(0.78, -0.05));
+            line(point(0.78, -0.55), point(0.28, -0.55));
+        }
+        UiIcon::Home => {
+            line(point(-0.9, -0.05), point(0.0, -0.85));
+            line(point(0.0, -0.85), point(0.9, -0.05));
+            line(point(-0.65, -0.25), point(-0.65, 0.8));
+            line(point(0.65, -0.25), point(0.65, 0.8));
+            line(point(-0.65, 0.8), point(0.65, 0.8));
+            line(point(-0.15, 0.8), point(-0.15, 0.2));
+            line(point(0.15, 0.8), point(0.15, 0.2));
+        }
+        UiIcon::ChevronRight => {
+            line(point(-0.25, -0.65), point(0.35, 0.0));
+            line(point(0.35, 0.0), point(-0.25, 0.65));
+        }
+        UiIcon::ArrowLeft => {
+            line(point(0.75, 0.0), point(-0.75, 0.0));
+            line(point(-0.75, 0.0), point(-0.15, -0.6));
+            line(point(-0.75, 0.0), point(-0.15, 0.6));
+        }
+        UiIcon::Plus => {
+            line(point(-0.65, 0.0), point(0.65, 0.0));
+            line(point(0.0, -0.65), point(0.0, 0.65));
+        }
+        UiIcon::Star => {
+            let points = std::array::from_fn::<_, 11, _>(|step| {
+                let angle = -std::f32::consts::FRAC_PI_2
+                    + step as f32 * std::f32::consts::PI / 5.0;
+                let radius = if step % 2 == 0 { 0.9 } else { 0.4 };
+                point(angle.cos() * radius, angle.sin() * radius)
+            });
+            for segment in points.windows(2) {
+                line(segment[0], segment[1]);
+            }
+        }
+        UiIcon::Close => {
+            line(point(-0.6, -0.6), point(0.6, 0.6));
+            line(point(0.6, -0.6), point(-0.6, 0.6));
+        }
+        UiIcon::Folder => {
+            let points = [
+                point(-0.9, -0.55), point(-0.2, -0.55), point(0.0, -0.25),
+                point(0.9, -0.25), point(0.75, 0.65), point(-0.75, 0.65),
+                point(-0.9, -0.55),
+            ];
+            for segment in points.windows(2) {
+                line(segment[0], segment[1]);
+            }
+        }
+    }
+}
+
+fn icon_label_button(
+    ui: &mut egui::Ui,
+    icon: UiIcon,
+    label: &str,
+    size: Vec2,
+    fill: Color32,
+    color: Color32,
+    text_size: f32,
+    rounding: f32,
+) -> egui::Response {
+    let response = ui.add(
+        egui::Button::new(RichText::new(label).size(text_size).color(color))
+            .min_size(size)
+            .fill(fill)
+            .rounding(rounding),
+    );
+    let icon_size = 18.0_f32.min(size.y * 0.55);
+    let galley = ui.painter().layout_no_wrap(
+        label.to_owned(),
+        egui::FontId::proportional(text_size),
+        color,
+    );
+    let gap = if label.is_empty() { 0.0 } else { 8.0 };
+    let icon_center_x = response.rect.center().x - galley.size().x * 0.5 - gap - icon_size * 0.5;
+    paint_icon(
+        ui.painter(),
+        egui::Rect::from_center_size(
+            egui::pos2(icon_center_x, response.rect.center().y),
+            Vec2::splat(icon_size),
+        ),
+        icon,
+        color,
+    );
+    response
+}
+
 struct PageJob {
     path: PathBuf,
     page: u32,
@@ -1011,7 +1189,7 @@ impl Folio {
     }
 
     // Custom drawn navigation items keep icon, label and badge aligned without fonts or assets.
-    fn nav_item(ui: &mut egui::Ui, title: &str, symbol: &str, count: Option<usize>, active: bool,
+    fn nav_item(ui: &mut egui::Ui, title: &str, icon: UiIcon, count: Option<usize>, active: bool,
         indent: f32) -> bool {
         let width = ui.available_width().max(60.0);
         let (rect, response) = ui.allocate_exact_size(Vec2::new(width, 43.0), egui::Sense::click());
@@ -1025,8 +1203,11 @@ impl Folio {
             painter.rect_filled(rail, 2.0, Color32::from_rgb(45, 216, 196));
         }
         let color = if active { Color32::WHITE } else { Color32::from_rgb(214, 229, 237) };
-        painter.text(rect.left_center() + Vec2::new(15.0 + indent, 0.0), egui::Align2::LEFT_CENTER,
-            symbol, egui::FontId::proportional(20.0), color);
+        let icon_rect = egui::Rect::from_center_size(
+            rect.left_center() + Vec2::new(25.0 + indent, 0.0),
+            Vec2::splat(20.0),
+        );
+        paint_icon(painter, icon_rect, icon, color);
         painter.text(rect.left_center() + Vec2::new(47.0 + indent, 0.0), egui::Align2::LEFT_CENTER,
             title, egui::FontId::proportional(14.0), color);
         if let Some(count) = count {
@@ -1040,18 +1221,6 @@ impl Folio {
     }
 
     fn sidebar(&mut self, ui: &mut egui::Ui) {
-        ui.painter().rect_filled(ui.max_rect(), 0.0, Color32::from_rgb(11, 37, 54));
-        // A restrained teal gradient toward the footer, as in the design reference.
-        let rect = ui.max_rect();
-        for stripe in 0..32 {
-            let start = stripe as f32 / 32.0;
-            let y0 = rect.top() + rect.height() * start;
-            let y1 = rect.top() + rect.height() * (stripe + 1) as f32 / 32.0 + 1.0;
-            let glow = (start * 14.0) as u8;
-            ui.painter().rect_filled(egui::Rect::from_min_max(
-                egui::pos2(rect.left(), y0), egui::pos2(rect.right(), y1)), 0.0,
-                Color32::from_rgb(11, 37 + glow, 54 + glow));
-        }
         ui.add_space(20.0);
         ui.horizontal(|ui| {
             let (mark, _) = ui.allocate_exact_size(Vec2::new(48.0, 50.0), egui::Sense::hover());
@@ -1061,7 +1230,7 @@ impl Folio {
             p.rect_filled(egui::Rect::from_min_size(mark.min + Vec2::new(25.0, 9.0), Vec2::new(18.0, 32.0)),
                 4.0, Color32::from_rgb(33, 174, 172));
             p.line_segment([mark.min + Vec2::new(24.0, 11.0), mark.min + Vec2::new(24.0, 44.0)],
-                egui::Stroke::new(2.0, Color32::from_rgb(145, 254, 232)));
+                egui::Stroke::new(2.0_f32, Color32::from_rgb(145, 254, 232)));
             ui.vertical(|ui| {
                 ui.label(RichText::new("Folio.").size(28.0).strong().color(Color32::WHITE));
                 ui.label(RichText::new("THE PERSONAL PDF LIBRARY").size(9.5).color(Color32::from_rgb(169, 197, 208)));
@@ -1070,24 +1239,32 @@ impl Folio {
         ui.add_space(26.0);
         let can_add = self.file_dialog.is_none();
         let button_width = ui.available_width();
-        let add = egui::Button::new(RichText::new("＋  Add PDF").size(16.0)
-                .strong().color(Color32::WHITE))
-            .fill(Color32::from_rgb(25, 158, 152)).rounding(10.0)
-            .min_size(Vec2::new(button_width, 52.0));
-        if ui.add_enabled(can_add, add).clicked() { self.pick_pdfs(ui.ctx()); }
+        let add = ui.add_enabled_ui(can_add, |ui| {
+            icon_label_button(
+                ui,
+                UiIcon::Plus,
+                "Add PDF",
+                Vec2::new(button_width, 52.0),
+                Color32::from_rgb(25, 158, 152),
+                Color32::WHITE,
+                16.0,
+                10.0,
+            )
+        }).inner;
+        if add.clicked() { self.pick_pdfs(ui.ctx()); }
         ui.add_space(20.0);
         let all_count = if self.view == View::Library { Some(self.document_count) } else { None };
         for (view, icon, count) in [
-            (View::Library, "▣", all_count),
-            (View::Reading, "◷", Some(self.state.history.len())),
-            (View::Favorites, "♡", Some(self.state.favorites.len())),
+            (View::Library, UiIcon::Library, all_count),
+            (View::Reading, UiIcon::Clock, Some(self.state.history.len())),
+            (View::Favorites, UiIcon::Heart, Some(self.state.favorites.len())),
         ] {
             if Self::nav_item(ui, view.title(), icon, count, self.view == view, 0.0) {
                 self.change_view(view);
             }
         }
         ui.add_space((ui.available_height() - 100.0).max(12.0));
-        if Self::nav_item(ui, "Settings", "⚙", None, self.view == View::Settings, 0.0) {
+        if Self::nav_item(ui, "Settings", UiIcon::Settings, None, self.view == View::Settings, 0.0) {
             self.change_view(View::Settings);
         }
         ui.add_space(30.0);
@@ -1103,7 +1280,16 @@ impl Folio {
                     self.change_view(view);
                 }
             }
-            if ui.button("＋ Add PDF").clicked() { self.pick_pdfs(ui.ctx()); }
+            if icon_label_button(
+                ui,
+                UiIcon::Plus,
+                "Add PDF",
+                Vec2::new(120.0, 30.0),
+                ui.visuals().widgets.inactive.bg_fill,
+                ui.visuals().text_color(),
+                14.0,
+                4.0,
+            ).clicked() { self.pick_pdfs(ui.ctx()); }
         });
     }
 
@@ -1117,12 +1303,18 @@ impl Folio {
         egui::Frame::none()
             .fill(Color32::WHITE)
             .rounding(10.0)
-            .stroke(egui::Stroke::new(1.0, Color32::from_rgb(227, 233, 240)))
+            .stroke(egui::Stroke::new(1.0_f32, Color32::from_rgb(227, 233, 240)))
             .inner_margin(egui::Margin::symmetric(10.0, 7.0))
             .show(ui, |ui| {
                 ui.horizontal(|ui| {
-                    ui.label(RichText::new("⌕").size(19.0)
-                        .color(Color32::from_rgb(40, 66, 87)));
+                let (icon_rect, _) =
+                    ui.allocate_exact_size(Vec2::splat(19.0), egui::Sense::hover());
+                paint_icon(
+                    ui.painter(),
+                    icon_rect,
+                    UiIcon::Search,
+                    Color32::from_rgb(40, 66, 87),
+                );
                     ui.add(egui::TextEdit::singleline(&mut self.search)
                         .id(egui::Id::new("folio-search"))
                         .hint_text("Search documents...")
@@ -1140,15 +1332,27 @@ impl Folio {
         let selected = Color32::from_rgb(20, 159, 151);
         let unselected = Color32::from_rgb(239, 244, 248);
         let dark = Color32::from_rgb(21, 48, 66);
-        if ui.add(egui::Button::new(RichText::new("▦").size(18.0)
-                .color(if self.list_view { dark } else { Color32::WHITE }))
-                .fill(if self.list_view { unselected } else { selected })
-                .min_size(Vec2::new(42.0, 38.0)).rounding(8.0))
+        if icon_label_button(
+            ui,
+            UiIcon::Grid,
+            "",
+            Vec2::new(42.0, 38.0),
+            if self.list_view { unselected } else { selected },
+            if self.list_view { dark } else { Color32::WHITE },
+            18.0,
+            8.0,
+        )
             .on_hover_text("Grid view").clicked() { self.list_view = false; }
-        if ui.add(egui::Button::new(RichText::new("☷").size(18.0)
-                .color(if self.list_view { Color32::WHITE } else { dark }))
-                .fill(if self.list_view { selected } else { unselected })
-                .min_size(Vec2::new(42.0, 38.0)).rounding(8.0))
+        if icon_label_button(
+            ui,
+            UiIcon::List,
+            "",
+            Vec2::new(42.0, 38.0),
+            if self.list_view { selected } else { unselected },
+            if self.list_view { Color32::WHITE } else { dark },
+            18.0,
+            8.0,
+        )
             .on_hover_text("List view").clicked() { self.list_view = true; }
     }
 
@@ -1168,7 +1372,16 @@ impl Folio {
             }
             if !compact && self.view != View::Settings {
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if ui.add(egui::Button::new("⟳  Refresh").min_size(Vec2::new(98.0, 39.0))).clicked() {
+                    if icon_label_button(
+                        ui,
+                        UiIcon::Refresh,
+                        "Refresh",
+                        Vec2::new(98.0, 39.0),
+                        ui.visuals().widgets.inactive.bg_fill,
+                        ui.visuals().text_color(),
+                        14.0,
+                        4.0,
+                    ).clicked() {
                         self.refresh();
                     }
                     self.view_toggle(ui);
@@ -1183,7 +1396,16 @@ impl Folio {
                 let search_width = (ui.available_width() - 200.0).max(130.0);
                 self.toolbar_search(ui, search_width);
                 self.view_toggle(ui);
-                if ui.button("⟳").on_hover_text("Refresh").clicked() { self.refresh(); }
+                if icon_label_button(
+                    ui,
+                    UiIcon::Refresh,
+                    "",
+                    Vec2::new(38.0, 38.0),
+                    ui.visuals().widgets.inactive.bg_fill,
+                    ui.visuals().text_color(),
+                    14.0,
+                    4.0,
+                ).on_hover_text("Refresh").clicked() { self.refresh(); }
             });
         }
     }
@@ -1192,20 +1414,37 @@ impl Folio {
         if self.view != View::Library { return; }
         let Some(root) = self.state.root.clone() else { return; };
         let current = self.folder.clone().unwrap_or_else(|| root.clone());
-        let mut crumbs = vec![("⌂  Library root".to_owned(), root.clone())];
+        let mut crumbs = vec![(Some(UiIcon::Home), "Library root".to_owned(), root.clone())];
         if let Ok(relative) = current.strip_prefix(&root) {
             let mut cursor = root.clone();
             for part in relative.components() {
                 cursor.push(part.as_os_str());
-                crumbs.push((part.as_os_str().to_string_lossy().to_string(), cursor.clone()));
+                crumbs.push((None, part.as_os_str().to_string_lossy().to_string(), cursor.clone()));
             }
         }
         ui.horizontal_wrapped(|ui| {
-            for (index, (label, target)) in crumbs.into_iter().enumerate() {
-                if index > 0 { ui.label(RichText::new("›").size(19.0).color(Color32::from_rgb(159, 178, 196))); }
-                if ui.add(egui::Button::new(RichText::new(label).size(12.0)
-                        .color(Color32::from_rgb(57, 80, 105)))
-                        .fill(Color32::from_rgb(238, 243, 249)).rounding(7.0)).clicked() {
+            for (index, (icon, label, target)) in crumbs.into_iter().enumerate() {
+                if index > 0 {
+                    let (rect, _) = ui.allocate_exact_size(Vec2::new(14.0, 24.0), egui::Sense::hover());
+                    paint_icon(ui.painter(), rect, UiIcon::ChevronRight, Color32::from_rgb(159, 178, 196));
+                }
+                let clicked = if let Some(icon) = icon {
+                    icon_label_button(
+                        ui,
+                        icon,
+                        &label,
+                        Vec2::new(116.0, 30.0),
+                        Color32::from_rgb(238, 243, 249),
+                        Color32::from_rgb(57, 80, 105),
+                        12.0,
+                        7.0,
+                    ).clicked()
+                } else {
+                    ui.add(egui::Button::new(RichText::new(label).size(12.0)
+                            .color(Color32::from_rgb(57, 80, 105)))
+                            .fill(Color32::from_rgb(238, 243, 249)).rounding(7.0)).clicked()
+                };
+                if clicked {
                     if self.folder.as_ref() != Some(&target) { self.browse_folder(target); }
                 }
             }
@@ -1213,7 +1452,17 @@ impl Folio {
     }
 
     fn settings(&mut self, ui: &mut egui::Ui) {
-        if ui.button("← Back to Library").clicked() {
+        let back = icon_label_button(
+            ui,
+            UiIcon::ArrowLeft,
+            "Back to Library",
+            Vec2::new(150.0, 30.0),
+            ui.visuals().widgets.inactive.bg_fill,
+            ui.visuals().text_color(),
+            14.0,
+            4.0,
+        );
+        if back.clicked() {
             self.view = View::Library;
             self.load();
         }
@@ -1437,20 +1686,29 @@ impl Folio {
                                 let favorite_width = (content_width - remove_width
                                     - if remove_width > 0.0 { 5.0 } else { 0.0 })
                                     .max(24.0);
-                                if ui
-                                    .add_sized(
-                                        [favorite_width, 26.0],
-                                        egui::Button::new(if favored { "★ Saved" } else { "☆ Favorite" }),
-                                    )
-                                    .clicked()
-                                {
+                                if icon_label_button(
+                                    ui,
+                                    UiIcon::Star,
+                                    if favored { "Saved" } else { "Favorite" },
+                                    Vec2::new(favorite_width, 26.0),
+                                    ui.visuals().widgets.inactive.bg_fill,
+                                    ui.visuals().text_color(),
+                                    12.0,
+                                    4.0,
+                                ).clicked() {
                                     self.send(Task::Favorite(e.path.clone(), !favored));
                                 }
                                 if self.view == View::Reading
-                                    && ui
-                                        .add_sized([remove_width, 26.0], egui::Button::new("✕"))
-                                        .on_hover_text("Remove from Currently Reading (PDF stays on disk)")
-                                        .clicked()
+                                    && icon_label_button(
+                                        ui,
+                                        UiIcon::Close,
+                                        "",
+                                        Vec2::new(remove_width, 26.0),
+                                        ui.visuals().widgets.inactive.bg_fill,
+                                        ui.visuals().text_color(),
+                                        12.0,
+                                        4.0,
+                                    ).on_hover_text("Remove from Currently Reading (PDF stays on disk)").clicked()
                                 {
                                     self.send(Task::Remove(e.path.clone()));
                                 }
@@ -1480,9 +1738,12 @@ impl Folio {
                         ui.painter().image(texture.id(), egui::Rect::from_center_size(rect.center(), size*scale),
                             egui::Rect::from_min_max(egui::Pos2::ZERO, egui::pos2(1.0, 1.0)), Color32::WHITE);
                     } else {
-                        ui.painter().text(rect.center(), egui::Align2::CENTER_CENTER,
-                            if e.directory { "▱" } else { "PDF" }, egui::FontId::proportional(15.0),
-                            Color32::from_rgb(25, 142, 134));
+                        if e.directory {
+                            paint_icon(ui.painter(), rect.shrink(15.0), UiIcon::Folder, Color32::from_rgb(25, 142, 134));
+                        } else {
+                            ui.painter().text(rect.center(), egui::Align2::CENTER_CENTER,
+                                "PDF", egui::FontId::proportional(15.0), Color32::from_rgb(25, 142, 134));
+                        }
                     }
                     if response.clicked() && e.available {
                         if e.directory { self.browse_folder(e.path.clone()); }
@@ -1500,12 +1761,29 @@ impl Folio {
                     });
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         if !e.directory {
-                            if self.view == View::Reading && ui.small_button("✕")
-                                .on_hover_text("Remove from Currently Reading").clicked() {
+                            if self.view == View::Reading && icon_label_button(
+                                ui,
+                                UiIcon::Close,
+                                "",
+                                Vec2::new(24.0, 24.0),
+                                ui.visuals().widgets.inactive.bg_fill,
+                                ui.visuals().text_color(),
+                                12.0,
+                                4.0,
+                            ).on_hover_text("Remove from Currently Reading").clicked() {
                                 self.send(Task::Remove(e.path.clone()));
                             }
                             let favorite = self.favorite_set.contains(&e.path);
-                            if ui.small_button(if favorite { "★ Saved" } else { "☆ Favorite" }).clicked() {
+                            if icon_label_button(
+                                ui,
+                                UiIcon::Star,
+                                if favorite { "Saved" } else { "Favorite" },
+                                Vec2::new(86.0, 24.0),
+                                ui.visuals().widgets.inactive.bg_fill,
+                                ui.visuals().text_color(),
+                                11.0,
+                                4.0,
+                            ).clicked() {
                                 self.send(Task::Favorite(e.path.clone(), !favorite));
                             }
                         }
@@ -1608,7 +1886,16 @@ impl Folio {
     fn reader_ui(&mut self, ctx: &egui::Context) {
         egui::TopBottomPanel::top("reader_toolbar").show(ctx, |ui| {
             ui.horizontal_wrapped(|ui| {
-                if ui.button("← Back").clicked() {
+                if icon_label_button(
+                    ui,
+                    UiIcon::ArrowLeft,
+                    "Back",
+                    Vec2::new(78.0, 28.0),
+                    ui.visuals().widgets.inactive.bg_fill,
+                    ui.visuals().text_color(),
+                    14.0,
+                    4.0,
+                ).clicked() {
                     self.back();
                     return;
                 }
