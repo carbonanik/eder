@@ -1,5 +1,5 @@
 use eframe::egui::{self, Color32, RichText, TextureHandle, Vec2};
-use folio_reader::{
+use eder::{
     library::{self, Entry},
     render,
     store::{ReadingPosition, Snapshot, Store},
@@ -308,7 +308,7 @@ impl Reader {
     }
 }
 
-pub struct Folio {
+pub struct Eder {
     tx: SyncSender<Task>,
     rx: Receiver<Event>,
     page_rx: Receiver<PageResult>,
@@ -525,7 +525,7 @@ fn data_worker(
         }
     }
 }
-impl Folio {
+impl Eder {
     pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
         let mut style = (*cc.egui_ctx.style()).clone();
         style.spacing.item_spacing = Vec2::new(12.0, 10.0);
@@ -1181,7 +1181,7 @@ impl Folio {
         std::thread::spawn(move || {
             let paths = std::panic::catch_unwind(|| {
                 rfd::FileDialog::new().add_filter("PDF documents", &["pdf"])
-                    .set_title("Add PDFs to Folio").pick_files()
+                    .set_title("Add PDFs to Eder").pick_files()
             }).unwrap_or(None);
             let _ = tx.send(paths);
             ctx.request_repaint();
@@ -1232,7 +1232,7 @@ impl Folio {
             p.line_segment([mark.min + Vec2::new(24.0, 11.0), mark.min + Vec2::new(24.0, 44.0)],
                 egui::Stroke::new(2.0_f32, Color32::from_rgb(145, 254, 232)));
             ui.vertical(|ui| {
-                ui.label(RichText::new("Folio.").size(28.0).strong().color(Color32::WHITE));
+                ui.label(RichText::new("Eder.").size(28.0).strong().color(Color32::WHITE));
                 ui.label(RichText::new("THE PERSONAL PDF LIBRARY").size(9.5).color(Color32::from_rgb(169, 197, 208)));
             });
         });
@@ -1274,7 +1274,7 @@ impl Folio {
 
     fn compact_nav(&mut self, ui: &mut egui::Ui) {
         ui.horizontal_wrapped(|ui| {
-            ui.label(RichText::new("Folio.").size(20.0).strong().color(Color32::from_rgb(14, 105, 103)));
+            ui.label(RichText::new("Eder.").size(20.0).strong().color(Color32::from_rgb(14, 105, 103)));
             for view in [View::Library, View::Reading, View::Favorites, View::Settings] {
                 if ui.selectable_label(self.view == view, view.title()).clicked() {
                     self.change_view(view);
@@ -1316,7 +1316,7 @@ impl Folio {
                     Color32::from_rgb(40, 66, 87),
                 );
                     ui.add(egui::TextEdit::singleline(&mut self.search)
-                        .id(egui::Id::new("folio-search"))
+                        .id(egui::Id::new("eder-search"))
                         .hint_text("Search documents...")
                         .desired_width((width - 107.0).max(75.0))
                         .frame(false));
@@ -2193,7 +2193,7 @@ fn color_image(image: image::RgbaImage) -> egui::ColorImage {
     let size = [image.width() as usize, image.height() as usize];
     egui::ColorImage::from_rgba_unmultiplied(size, image.as_raw())
 }
-impl eframe::App for Folio {
+impl eframe::App for Eder {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         self.poll(ctx);
         if ctx.input(|i| i.viewport().close_requested()) && !self.closed && !self.fatal {
@@ -2237,7 +2237,7 @@ impl eframe::App for Folio {
         }
         if ctx.input(|input| (input.modifiers.command || input.modifiers.ctrl)
             && input.key_pressed(egui::Key::K)) {
-            ctx.memory_mut(|m| m.request_focus(egui::Id::new("folio-search")));
+            ctx.memory_mut(|m| m.request_focus(egui::Id::new("eder-search")));
         }
         if ctx.screen_rect().width() > 820.0 {
             egui::SidePanel::left("sidebar")
@@ -2274,9 +2274,9 @@ mod tests {
     use super::*;
     #[test]
     fn grid_columns_adapt_to_window_size() {
-        assert_eq!(Folio::grid_columns(280.0), 1);
-        assert_eq!(Folio::grid_columns(390.0), 2);
-        assert_eq!(Folio::grid_columns(850.0), 4);
+        assert_eq!(Eder::grid_columns(280.0), 1);
+        assert_eq!(Eder::grid_columns(390.0), 2);
+        assert_eq!(Eder::grid_columns(850.0), 4);
     }
 
     #[test]
@@ -2290,7 +2290,7 @@ mod tests {
         let (link_tx, _link_jobs) = mpsc::sync_channel::<LinkJob>(12);
         let (_link_results, link_rx) = mpsc::sync_channel::<LinkResult>(8);
         let root = PathBuf::from("/library");
-        let mut app = Folio {
+        let mut app = Eder {
             tx,
             rx,
             page_rx,
@@ -2445,10 +2445,10 @@ mod tests {
 
     #[test]
     fn adaptive_resolution_is_bucketed_and_bounded() {
-        let compact = Folio::page_edge(Vec2::new(360.0, 500.0), 1.0, 1.0, true);
-        let wide = Folio::page_edge(Vec2::new(1100.0, 700.0), 1.0, 1.0, true);
+        let compact = Eder::page_edge(Vec2::new(360.0, 500.0), 1.0, 1.0, true);
+        let wide = Eder::page_edge(Vec2::new(1100.0, 700.0), 1.0, 1.0, true);
         assert!(compact < wide);
         assert!(wide <= render::PAGE_EDGE);
-        assert_eq!(Folio::page_edge(Vec2::new(3000.0, 2000.0), 3.0, 2.0, true), render::PAGE_EDGE);
+        assert_eq!(        Eder::page_edge(Vec2::new(3000.0, 2000.0), 3.0, 2.0, true), render::PAGE_EDGE);
     }
 }

@@ -186,7 +186,8 @@ pub fn page_links(
 
 fn program(name: &str) -> PathBuf {
     // Optional explicit, trusted Poppler installation directory; never searched in the library.
-    std::env::var_os("FOLIO_POPPLER_DIR")
+    std::env::var_os("EDER_POPPLER_DIR")
+        .or_else(|| std::env::var_os("FOLIO_POPPLER_DIR"))
         .map(PathBuf::from)
         .map(|p| {
             p.join(if cfg!(windows) {

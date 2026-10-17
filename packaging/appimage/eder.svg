@@ -1,4 +1,5 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128">
+  <title>Eder</title>
   <rect x="18" y="12" width="84" height="104" rx="12" fill="#172b40"/>
   <path d="M42 35h39M42 52h44M42 69h29M42 91h44" fill="none" stroke="#f3f7fa" stroke-linecap="round" stroke-width="8"/>
   <path d="M95 12v23h23" fill="#287f83" transform="translate(-11 0)"/>

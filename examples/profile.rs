@@ -1,5 +1,5 @@
 //! Reproducible smoke measurements, not a comprehensive performance benchmark.
-use folio_reader::{library, render};
+use eder::{library, render};
 use std::{
     path::PathBuf,
     sync::{atomic::AtomicU64, Arc},

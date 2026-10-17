@@ -8,8 +8,8 @@ fn main() -> eframe::Result {
         ..Default::default()
     };
     eframe::run_native(
-        "Folio — PDF Library",
+        "Eder — PDF Library",
         options,
-        Box::new(|cc| Ok(Box::new(app::Folio::new(cc)))),
+        Box::new(|cc| Ok(Box::new(app::Eder::new(cc)))),
     )
 }

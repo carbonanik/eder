@@ -1,4 +1,4 @@
-use folio_reader::render;
+use eder::render;
 use std::{
     path::PathBuf,
     sync::{atomic::AtomicU64, Arc},

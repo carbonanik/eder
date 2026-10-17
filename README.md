@@ -1,16 +1,16 @@
-# Folio — native Rust PDF library
+# Eder — native Rust PDF library
 
 A local desktop PDF browser and reader implemented from the supplied PDF Library and Reader SRS. Native egui/OpenGL interface, Rust application logic, SQLite persistence, and Poppler PDF rendering. No webview, account, telemetry, or document upload. Source documents are opened read-only by the renderer.
 
 ## Start on Linux
 
-A Linux x86-64 release executable is included in `bin/folio-reader` in the delivery archive. It was compiled on this environment; compatibility with older Linux distributions is not guaranteed. Install Poppler and the normal desktop graphics libraries, then run:
+A Linux x86-64 release executable is included in `bin/eder` in the delivery archive. It was compiled on this environment; compatibility with older Linux distributions is not guaranteed. Install Poppler and the normal desktop graphics libraries, then run:
 
 ```sh
 # Debian / Ubuntu
 sudo apt-get install poppler-utils libxkbcommon0 libgl1
-chmod +x bin/folio-reader
-./bin/folio-reader
+chmod +x bin/eder
+./bin/eder
 ```
 
 A desktop X11 or Wayland session with OpenGL support is required. On other architectures or incompatible Linux distributions, build from source below. Choose **Settings → Choose folder**, or enter an absolute folder path. Poppler is a separate runtime dependency and is not bundled.
@@ -23,7 +23,7 @@ Install the current stable Rust toolchain with Cargo (the locked Linux dependenc
 # Linux build dependencies (Debian / Ubuntu)
 sudo apt-get install build-essential pkg-config libxkbcommon-dev libwayland-dev libgl1-mesa-dev poppler-utils
 cargo build --locked --release -j 2
-./target/release/folio-reader
+./target/release/eder
 ```
 
 ## Build an AppImage
@@ -38,7 +38,7 @@ The AppImage is written to `target/appimage/`. Poppler and the host's desktop gr
 
 macOS: install Xcode command-line tools, Rust, and Poppler (`brew install poppler`), then `cargo run --locked --release`.
 
-Windows: install Rust's MSVC toolchain and Visual Studio C++ build tools. Install a trusted Poppler build and put its `bin` directory on PATH, or set `FOLIO_POPPLER_DIR` to that directory. Run `cargo build --locked --release`; the program is `target\release\folio-reader.exe`.
+Windows: install Rust's MSVC toolchain and Visual Studio C++ build tools. Install a trusted Poppler build and put its `bin` directory on PATH, or set `EDER_POPPLER_DIR` to that directory (`FOLIO_POPPLER_DIR` remains supported for compatibility). Run `cargo build --locked --release`; the program is `target\release\eder.exe`.
 
 The Rust source uses cross-platform APIs. Only Linux compilation and headless tests were performed here; Windows/macOS packages and native desktop interaction are not yet validated. This is a desktop application, not an Android/iOS build. Compact desktop windows are supported.
 
@@ -80,7 +80,7 @@ Poppler starts a subprocess on each cold page render. Recent-page and preview re
 
 ## Data and recovery
 
-Data uses the OS application-data directory returned by `directories::ProjectDirs` for `com / Folio / Folio`; the database is `folio.sqlite3`. Cached previews use its separate cache directory under `previews-v1`.
+Data continues using the existing OS application-data directory returned by `directories::ProjectDirs` for `com / Folio / Folio`, so upgrading preserves saved library settings and reading progress. The database is `folio.sqlite3`; cached previews use its separate cache directory under `previews-v1`.
 
 - SQLite WAL and FULL synchronous writes protect completed transactions.
 - Page updates are queued on every navigation event and drained before a normal window close. A forced kill can lose an update still in the queue.

@@ -1,8 +1,8 @@
 [Desktop Entry]
 Type=Application
-Name=Folio — PDF Library
+Name=Eder — PDF Library
 Comment=Browse and read a local PDF library
-Exec=folio-reader
-Icon=folio-reader
+Exec=eder
+Icon=eder
 Terminal=false
 Categories=Office;Viewer;
