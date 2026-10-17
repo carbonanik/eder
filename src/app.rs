@@ -123,7 +123,14 @@ struct Reader {
 }
 impl Reader {
     fn reading_position(&self, continuous: bool) -> ReadingPosition {
-        ReadingPosition::new(self.page, if continuous { self.scroll_fraction } else { 0.0 })
+        ReadingPosition::new(
+            self.page,
+            if continuous {
+                self.scroll_fraction
+            } else {
+                0.0
+            },
+        )
     }
 }
 
@@ -253,7 +260,10 @@ fn data_worker(
                         } else {
                             String::new()
                         };
-                        send(Event::Notice(format!("Position saved: page {}{suffix}.", position.page)));
+                        send(Event::Notice(format!(
+                            "Position saved: page {}{suffix}.",
+                            position.page
+                        )));
                     }
                     return Ok(());
                 }
@@ -350,9 +360,8 @@ impl Folio {
                         }
                         value.take().unwrap()
                     };
-                    let mut result = render::raster(
-                        &job.path, job.page, job.edge, &cache, &gen, job.id,
-                    );
+                    let mut result =
+                        render::raster(&job.path, job.page, job.edge, &cache, &gen, job.id);
                     if let Ok(image) = &mut result {
                         if job.dark {
                             for pixel in image.pixels_mut() {
@@ -365,10 +374,16 @@ impl Folio {
                     // Avoid building a multi-megabyte ColorImage on the egui thread.
                     let result = result.map(color_image);
                     if gen.load(Ordering::Acquire) == job.id {
-                        if page_tx.send(PageResult {
-                            id: job.id, page: job.page, edge: job.edge,
-                            dark: job.dark, result,
-                        }).is_err() {
+                        if page_tx
+                            .send(PageResult {
+                                id: job.id,
+                                page: job.page,
+                                edge: job.edge,
+                                dark: job.dark,
+                                result,
+                            })
+                            .is_err()
+                        {
                             break;
                         }
                         ctx.request_repaint();
@@ -392,13 +407,17 @@ impl Folio {
                     if gen.load(Ordering::Acquire) != job.id {
                         continue;
                     }
-                    let links = render::page_links(
-                        &job.path, job.page, job.total, &gen, job.id,
-                    ).unwrap_or_default();
+                    let links = render::page_links(&job.path, job.page, job.total, &gen, job.id)
+                        .unwrap_or_default();
                     if gen.load(Ordering::Acquire) == job.id {
-                        if link_results.send(LinkResult {
-                            id: job.id, page: job.page, links,
-                        }).is_err() {
+                        if link_results
+                            .send(LinkResult {
+                                id: job.id,
+                                page: job.page,
+                                links,
+                            })
+                            .is_err()
+                        {
                             break;
                         }
                         ctx.request_repaint();
@@ -417,9 +436,10 @@ impl Folio {
                     if gen.load(Ordering::Acquire) != job.id {
                         continue;
                     }
-                    let image = render::raster(
-                        &job.path, 1, render::THUMB_EDGE, &cache, &gen, job.id,
-                    ).ok().map(color_image);
+                    let image =
+                        render::raster(&job.path, 1, render::THUMB_EDGE, &cache, &gen, job.id)
+                            .ok()
+                            .map(color_image);
                     if gen.load(Ordering::Acquire) == job.id {
                         if thumb_results
                             .send(ThumbResult {
@@ -511,8 +531,12 @@ impl Folio {
         render::edge_bucket(desired)
     }
     fn set_page_edge(&mut self, edge: u32) {
-        let Some(reader) = &mut self.reader else { return };
-        if reader.target_edge == edge { return; }
+        let Some(reader) = &mut self.reader else {
+            return;
+        };
+        if reader.target_edge == edge {
+            return;
+        }
         reader.target_edge = edge;
         if self.state.continuous_scroll {
             // Keep low-resolution cached pages visible while better versions arrive.
@@ -529,9 +553,13 @@ impl Folio {
         r.pending_page = None;
         r.queued_pages.clear();
         r.failed.remove(&r.page);
-        let best_index = r.cache.iter().enumerate()
+        let best_index = r
+            .cache
+            .iter()
+            .enumerate()
             .filter(|(_, item)| item.page == r.page && item.dark == self.state.dark)
-            .max_by_key(|(_, item)| item.edge).map(|(i, _)| i);
+            .max_by_key(|(_, item)| item.edge)
+            .map(|(i, _)| i);
         if let Some(index) = best_index {
             let item = r.cache.remove(index).unwrap();
             let suitable = item.edge >= r.target_edge;
@@ -548,8 +576,11 @@ impl Folio {
         r.loading = r.texture.is_none();
         r.pending_page = Some(r.page);
         *self.pages.0.lock().unwrap() = Some(PageJob {
-            path: r.path.clone(), page: r.page,
-            edge: r.target_edge, dark: self.state.dark, id,
+            path: r.path.clone(),
+            page: r.page,
+            edge: r.target_edge,
+            dark: self.state.dark,
+            id,
         });
         self.pages.1.notify_one();
     }
@@ -579,9 +610,13 @@ impl Folio {
     }
     fn flush_position_if_idle(&mut self, ctx: &egui::Context) {
         let pending = self.reader.as_ref().and_then(|reader| {
-            reader.position_changed_at.map(|changed| (
-                reader.path.clone(), reader.reading_position(self.state.continuous_scroll), changed,
-            ))
+            reader.position_changed_at.map(|changed| {
+                (
+                    reader.path.clone(),
+                    reader.reading_position(self.state.continuous_scroll),
+                    changed,
+                )
+            })
         });
         if let Some((path, position, changed)) = pending {
             if changed.elapsed() >= POSITION_SAVE_DELAY {
@@ -609,8 +644,12 @@ impl Folio {
         }
     }
     fn queue_continuous_pages(&mut self, visible: &[u32]) {
-        let Some(reader) = &mut self.reader else { return };
-        let Some(first) = visible.iter().copied().min() else { return };
+        let Some(reader) = &mut self.reader else {
+            return;
+        };
+        let Some(first) = visible.iter().copied().min() else {
+            return;
+        };
         let last = visible.iter().copied().max().unwrap();
         // Cancel a render that is now far away after a fast scroll or page jump.
         if reader.pending_page.is_some_and(|pending| {
@@ -620,14 +659,20 @@ impl Folio {
             reader.pending_page = None;
             reader.queued_pages.clear();
         }
-        let forward = reader.last_visible_page.map_or(true, |previous| first >= previous);
+        let forward = reader
+            .last_visible_page
+            .map_or(true, |previous| first >= previous);
         reader.last_visible_page = Some(first);
         let mut desired = visible.to_vec();
         // Prefetch in scroll direction first; never spend the pipeline on distant pages.
         for distance in 1..=3 {
             let ahead = last.saturating_add(distance);
             let behind = first.checked_sub(distance);
-            let pair = if forward { [Some(ahead), behind] } else { [behind, Some(ahead)] };
+            let pair = if forward {
+                [Some(ahead), behind]
+            } else {
+                [behind, Some(ahead)]
+            };
             for page in pair.into_iter().flatten() {
                 if (1..=reader.total).contains(&page) && !desired.contains(&page) {
                     desired.push(page);
@@ -638,9 +683,14 @@ impl Folio {
         for page in desired {
             if reader.pending_page == Some(page)
                 || reader.failed.contains(&page)
-                || reader.cache.iter().any(|item| item.page == page
-                    && item.dark == self.state.dark && item.edge >= reader.target_edge)
-            { continue; }
+                || reader.cache.iter().any(|item| {
+                    item.page == page
+                        && item.dark == self.state.dark
+                        && item.edge >= reader.target_edge
+                })
+            {
+                continue;
+            }
             reader.queued_pages.push_back(page);
         }
         self.dispatch_continuous_page();
@@ -648,21 +698,32 @@ impl Folio {
     fn dispatch_continuous_page(&mut self) {
         let id = self.page_gen.load(Ordering::Acquire);
         if let Some(reader) = &mut self.reader {
-            if reader.pending_page.is_some() { return; }
-            let Some(page) = reader.queued_pages.pop_front() else { return };
+            if reader.pending_page.is_some() {
+                return;
+            }
+            let Some(page) = reader.queued_pages.pop_front() else {
+                return;
+            };
             reader.pending_page = Some(page);
             *self.pages.0.lock().unwrap() = Some(PageJob {
-                path: reader.path.clone(), page,
-                edge: reader.target_edge, dark: self.state.dark, id,
+                path: reader.path.clone(),
+                page,
+                edge: reader.target_edge,
+                dark: self.state.dark,
+                id,
             });
             self.pages.1.notify_one();
         }
     }
     fn queue_links(&mut self, page: u32) {
         let Some(r) = &mut self.reader else { return };
-        if r.links.contains_key(&page) || !r.link_pending.insert(page) { return; }
+        if r.links.contains_key(&page) || !r.link_pending.insert(page) {
+            return;
+        }
         let job = LinkJob {
-            path: r.path.clone(), page, total: r.total,
+            path: r.path.clone(),
+            page,
+            total: r.total,
             id: self.link_gen.load(Ordering::Acquire),
         };
         if self.link_tx.try_send(job).is_err() {
@@ -672,7 +733,9 @@ impl Folio {
     fn back(&mut self) {
         if let Some(r) = &self.reader {
             if !self.send(Task::Position(
-                r.path.clone(), r.reading_position(self.state.continuous_scroll), false,
+                r.path.clone(),
+                r.reading_position(self.state.continuous_scroll),
+                false,
             )) {
                 return;
             }
@@ -787,36 +850,54 @@ impl Folio {
             if result.id == self.page_gen.load(Ordering::Acquire) {
                 let mut load_links = false;
                 if let Some(r) = &mut self.reader {
-                    if r.pending_page == Some(result.page) { r.pending_page = None; }
+                    if r.pending_page == Some(result.page) {
+                        r.pending_page = None;
+                    }
                     match result.result {
                         Ok(image) => {
-                            let redundant = r.cache.iter().any(|item|
-                                item.page == result.page && item.dark == result.dark
-                                && item.edge >= result.edge);
+                            let redundant = r.cache.iter().any(|item| {
+                                item.page == result.page
+                                    && item.dark == result.dark
+                                    && item.edge >= result.edge
+                            });
                             if !redundant {
-                                let t = ctx.load_texture("page", image, egui::TextureOptions::LINEAR);
-                                r.cache.retain(|item| !(item.page == result.page
-                                    && item.dark == result.dark && item.edge <= result.edge));
+                                let t =
+                                    ctx.load_texture("page", image, egui::TextureOptions::LINEAR);
+                                r.cache.retain(|item| {
+                                    !(item.page == result.page
+                                        && item.dark == result.dark
+                                        && item.edge <= result.edge)
+                                });
                                 r.cache.push_back(CachedPage {
-                                    page: result.page, dark: result.dark,
-                                    edge: result.edge, texture: t.clone(),
+                                    page: result.page,
+                                    dark: result.dark,
+                                    edge: result.edge,
+                                    texture: t.clone(),
                                 });
                                 if result.page == r.page && result.dark == self.state.dark {
                                     r.texture = Some(t);
                                     r.loading = false;
                                 }
                                 // LRU budget; never evict the current viewport's pages.
-                                while r.cache.iter().map(|item|
-                                    item.texture.size()[0] * item.texture.size()[1] * 4
-                                ).sum::<usize>() > PAGE_CACHE_BUDGET {
+                                while r
+                                    .cache
+                                    .iter()
+                                    .map(|item| item.texture.size()[0] * item.texture.size()[1] * 4)
+                                    .sum::<usize>()
+                                    > PAGE_CACHE_BUDGET
+                                {
                                     let current = r.page;
                                     let protected = r.last_visible_page.unwrap_or(current);
                                     let first = protected.saturating_sub(2);
                                     let last = protected.saturating_add(4);
-                                    let evict = r.cache.iter().position(|item|
-                                        item.page != current && !(first..=last).contains(&item.page));
-                                    if let Some(index) = evict { r.cache.remove(index); }
-                                    else { break; }
+                                    let evict = r.cache.iter().position(|item| {
+                                        item.page != current && !(first..=last).contains(&item.page)
+                                    });
+                                    if let Some(index) = evict {
+                                        r.cache.remove(index);
+                                    } else {
+                                        break;
+                                    }
                                 }
                             }
                             load_links = true;
@@ -830,12 +911,16 @@ impl Folio {
                         }
                     }
                 }
-                if load_links { self.queue_links(result.page); }
+                if load_links {
+                    self.queue_links(result.page);
+                }
             }
         }
         // Independent metadata pipeline: no raster blocks on pdftohtml.
         for _ in 0..8 {
-            let Ok(result) = self.link_rx.try_recv() else { break };
+            let Ok(result) = self.link_rx.try_recv() else {
+                break;
+            };
             if result.id == self.link_gen.load(Ordering::Acquire) {
                 if let Some(r) = &mut self.reader {
                     r.link_pending.remove(&result.page);
@@ -850,10 +935,16 @@ impl Folio {
                 if result.id == self.thumb_gen.load(Ordering::Acquire) {
                     self.pending.remove(&result.path);
                     self.touch(&result.path);
-                    self.textures.insert(result.path,
-                        result.image.map(|i| ctx.load_texture("preview", i, egui::TextureOptions::LINEAR)));
+                    self.textures.insert(
+                        result.path,
+                        result
+                            .image
+                            .map(|i| ctx.load_texture("preview", i, egui::TextureOptions::LINEAR)),
+                    );
                     while self.lru.len() > 64 {
-                        if let Some(p) = self.lru.pop_front() { self.textures.remove(&p); }
+                        if let Some(p) = self.lru.pop_front() {
+                            self.textures.remove(&p);
+                        }
                     }
                 }
             }
@@ -1055,7 +1146,8 @@ impl Folio {
                             let scale = ((rect.width() - 16.0) / size.x)
                                 .min((rect.height() - 12.0) / size.y)
                                 .min(1.0);
-                            let image_rect = egui::Rect::from_center_size(rect.center(), size * scale);
+                            let image_rect =
+                                egui::Rect::from_center_size(rect.center(), size * scale);
                             ui.painter().image(
                                 texture.id(),
                                 image_rect,
@@ -1063,10 +1155,8 @@ impl Folio {
                                 Color32::WHITE,
                             );
                         } else {
-                            let paper = egui::Rect::from_center_size(
-                                rect.center(),
-                                Vec2::new(85.0, 112.0),
-                            );
+                            let paper =
+                                egui::Rect::from_center_size(rect.center(), Vec2::new(85.0, 112.0));
                             ui.painter().rect_filled(paper, 5.0, Color32::WHITE);
                             ui.painter().text(
                                 paper.center(),
@@ -1077,7 +1167,10 @@ impl Folio {
                             );
                         }
 
-                        if response.on_hover_text(e.path.display().to_string()).clicked() {
+                        if response
+                            .on_hover_text(e.path.display().to_string())
+                            .clicked()
+                        {
                             if e.directory {
                                 self.folder = Some(e.path.clone());
                                 self.load();
@@ -1125,14 +1218,23 @@ impl Folio {
                             let favored = self.favorite_set.contains(&e.path);
                             ui.horizontal(|ui| {
                                 ui.spacing_mut().item_spacing.x = 5.0;
-                                let remove_width = if self.view == View::Reading { 34.0 } else { 0.0 };
-                                let favorite_width = (content_width - remove_width
+                                let remove_width = if self.view == View::Reading {
+                                    34.0
+                                } else {
+                                    0.0
+                                };
+                                let favorite_width = (content_width
+                                    - remove_width
                                     - if remove_width > 0.0 { 5.0 } else { 0.0 })
-                                    .max(24.0);
+                                .max(24.0);
                                 if ui
                                     .add_sized(
                                         [favorite_width, 26.0],
-                                        egui::Button::new(if favored { "★ Saved" } else { "☆ Favorite" }),
+                                        egui::Button::new(if favored {
+                                            "★ Saved"
+                                        } else {
+                                            "☆ Favorite"
+                                        }),
                                     )
                                     .clicked()
                                 {
@@ -1141,7 +1243,9 @@ impl Folio {
                                 if self.view == View::Reading
                                     && ui
                                         .add_sized([remove_width, 26.0], egui::Button::new("✕"))
-                                        .on_hover_text("Remove from Currently Reading (PDF stays on disk)")
+                                        .on_hover_text(
+                                            "Remove from Currently Reading (PDF stays on disk)",
+                                        )
                                         .clicked()
                                 {
                                     self.send(Task::Remove(e.path.clone()));
@@ -1205,7 +1309,9 @@ impl Folio {
         if self.entries.is_empty() {
             ui.label(match self.view {
                 View::Library => "No PDFs or subfolders were found.",
-                View::Favorites => "No favorites yet. Select Favorite beside a PDF to keep it here.",
+                View::Favorites => {
+                    "No favorites yet. Select Favorite beside a PDF to keep it here."
+                }
                 _ => "PDFs you open appear in Currently Reading.",
             });
             return;
@@ -1257,8 +1363,12 @@ impl Folio {
             }
             let (page, total, path, position) = {
                 let r = self.reader.as_ref().unwrap();
-                (r.page, r.total, r.path.clone(),
-                    r.reading_position(self.state.continuous_scroll))
+                (
+                    r.page,
+                    r.total,
+                    r.path.clone(),
+                    r.reading_position(self.state.continuous_scroll),
+                )
             };
             ui.horizontal_wrapped(|ui| {
                 if ui
@@ -1284,7 +1394,9 @@ impl Folio {
                 }
                 if ui.button("Save Position").clicked() {
                     if self.send(Task::Position(path, position, true)) {
-                        if let Some(r) = &mut self.reader { r.position_changed_at = None; }
+                        if let Some(r) = &mut self.reader {
+                            r.position_changed_at = None;
+                        }
                     }
                 }
                 let mut dark = self.state.dark;
@@ -1400,8 +1512,8 @@ impl Folio {
             .zip(previous_offset)
             .filter(|(previous, _)| (*previous - row_stride).abs() > f32::EPSILON)
             .map(|(previous, offset)| offset * row_stride / previous);
-        let initial_anchor = scroll_to.map(|anchor|
-            ReadingPosition::new(anchor.page.clamp(1, total), anchor.fraction));
+        let initial_anchor = scroll_to
+            .map(|anchor| ReadingPosition::new(anchor.page.clamp(1, total), anchor.fraction));
         let mut visible_pages = Vec::new();
         let mut retry_page = None;
         let mut internal_jump = None;
@@ -1410,7 +1522,9 @@ impl Folio {
             for index in range {
                 let page = index as u32 + 1;
                 let reader = self.reader.as_ref().unwrap();
-                let texture = reader.cache.iter()
+                let texture = reader
+                    .cache
+                    .iter()
                     .filter(|item| item.page == page && item.dark == self.state.dark)
                     .max_by_key(|item| item.edge)
                     .map(|item| item.texture.clone());
@@ -1427,9 +1541,11 @@ impl Folio {
                             let scale = (available * zoom / image_size.x)
                                 .min(available_height / image_size.y);
                             let image_size = image_size * scale;
-                            let image = ui.add(egui::Image::new(&texture).fit_to_exact_size(image_size));
+                            let image =
+                                ui.add(egui::Image::new(&texture).fit_to_exact_size(image_size));
                             if let Some(links) = reader.links.get(&page) {
-                                if let Some(target) = clicked_pdf_link(ui, image.rect, page, links) {
+                                if let Some(target) = clicked_pdf_link(ui, image.rect, page, links)
+                                {
                                     internal_jump = Some(target);
                                 }
                             }
@@ -1455,7 +1571,10 @@ impl Folio {
                 .show_rows(ui, row_height, total as usize, &mut draw_pages)
         } else if let Some(offset) = resized_offset {
             scroll_area.vertical_scroll_offset(offset).show_rows(
-                ui, row_height, total as usize, &mut draw_pages,
+                ui,
+                row_height,
+                total as usize,
+                &mut draw_pages,
             )
         } else {
             scroll_area.show_rows(ui, row_height, total as usize, &mut draw_pages)
@@ -1471,8 +1590,10 @@ impl Folio {
         // Touch visible textures to keep actually-used pages at the back of the LRU.
         if let Some(reader) = &mut self.reader {
             for &page in &visible_pages {
-                if let Some(index) = reader.cache.iter().position(|item|
-                    item.page == page && item.dark == self.state.dark)
+                if let Some(index) = reader
+                    .cache
+                    .iter()
+                    .position(|item| item.page == page && item.dark == self.state.dark)
                 {
                     let item = reader.cache.remove(index).unwrap();
                     reader.cache.push_back(item);
@@ -1482,7 +1603,14 @@ impl Folio {
         // A full link-worker queue must not permanently lose link metadata.
         // Retry it opportunistically for already-rendered visible pages.
         for &page in &visible_pages {
-            if self.reader.as_ref().unwrap().cache.iter().any(|item| item.page == page) {
+            if self
+                .reader
+                .as_ref()
+                .unwrap()
+                .cache
+                .iter()
+                .any(|item| item.page == page)
+            {
                 self.queue_links(page);
             }
         }
@@ -1518,15 +1646,16 @@ fn clicked_pdf_link(
             continue;
         }
         let response = ui
-            .interact(rect, ui.id().with(("pdf-link", page, index)), egui::Sense::click())
+            .interact(
+                rect,
+                ui.id().with(("pdf-link", page, index)),
+                egui::Sense::click(),
+            )
             .on_hover_cursor(egui::CursorIcon::PointingHand)
             .on_hover_text(format!("Go to page {}", link.target_page));
         if response.hovered() {
-            ui.painter().rect_filled(
-                rect,
-                2.0,
-                Color32::from_rgba_unmultiplied(34, 129, 111, 34),
-            );
+            ui.painter()
+                .rect_filled(rect, 2.0, Color32::from_rgba_unmultiplied(34, 129, 111, 34));
         }
         if response.clicked() {
             destination = Some(link.target_page);
@@ -1547,7 +1676,9 @@ impl eframe::App for Folio {
             if !self.closing {
                 let save = if let Some(r) = &self.reader {
                     self.send(Task::Position(
-                        r.path.clone(), r.reading_position(self.state.continuous_scroll), false,
+                        r.path.clone(),
+                        r.reading_position(self.state.continuous_scroll),
+                        false,
                     ))
                 } else {
                     true
@@ -1730,7 +1861,10 @@ mod tests {
         app.turn(0);
         assert_eq!(app.reader.as_ref().unwrap().page, 1);
         assert!(app.reader.as_ref().unwrap().position_changed_at.is_some());
-        assert!(_tasks.try_recv().is_err(), "Normal navigation must not write a position per page");
+        assert!(
+            _tasks.try_recv().is_err(),
+            "Normal navigation must not write a position per page"
+        );
 
         app.state.continuous_scroll = true;
         app.reader.as_mut().unwrap().total = 20;
@@ -1743,10 +1877,14 @@ mod tests {
         assert_eq!(restored.page, 6);
         assert!((restored.fraction - saved.fraction).abs() < 0.001);
         app.turn(8);
-        assert_eq!(app.reader.as_ref().unwrap().reading_position(true),
-            ReadingPosition::new(8, 0.0));
-        assert_eq!(app.reader.as_ref().unwrap().scroll_to,
-            Some(ReadingPosition::new(8, 0.0)));
+        assert_eq!(
+            app.reader.as_ref().unwrap().reading_position(true),
+            ReadingPosition::new(8, 0.0)
+        );
+        assert_eq!(
+            app.reader.as_ref().unwrap().scroll_to,
+            Some(ReadingPosition::new(8, 0.0))
+        );
 
         let reader = app.reader.as_mut().unwrap();
         reader.total = 10_000;
@@ -1775,8 +1913,10 @@ mod tests {
         );
         let previous_generation = app.page_gen.load(Ordering::Acquire);
         app.queue_continuous_pages(&[5_000]);
-        assert!(app.page_gen.load(Ordering::Acquire) > previous_generation,
-            "A distant jump should cancel a render far outside the viewport");
+        assert!(
+            app.page_gen.load(Ordering::Acquire) > previous_generation,
+            "A distant jump should cancel a render far outside the viewport"
+        );
         assert!(
             app.reader.as_ref().unwrap().queued_pages.contains(&4_998),
             "Pages behind the visible range should be prefetched"
@@ -1793,6 +1933,9 @@ mod tests {
         let wide = Folio::page_edge(Vec2::new(1100.0, 700.0), 1.0, 1.0, true);
         assert!(compact < wide);
         assert!(wide <= render::PAGE_EDGE);
-        assert_eq!(Folio::page_edge(Vec2::new(3000.0, 2000.0), 3.0, 2.0, true), render::PAGE_EDGE);
+        assert_eq!(
+            Folio::page_edge(Vec2::new(3000.0, 2000.0), 3.0, 2.0, true),
+            render::PAGE_EDGE
+        );
     }
 }

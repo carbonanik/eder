@@ -20,8 +20,15 @@ pub const DISK_BUDGET: u64 = 384 * 1024 * 1024;
 /// Use coarse resolution steps to avoid rerendering for each tiny resize/zoom change.
 pub fn edge_bucket(desired_pixels: f32) -> u32 {
     const BUCKETS: [u32; 8] = [512, 704, 896, 1152, 1408, 1728, 2048, PAGE_EDGE];
-    let pixels = if desired_pixels.is_finite() { desired_pixels.max(1.0) } else { 1152.0 };
-    BUCKETS.into_iter().find(|&edge| edge as f32 >= pixels).unwrap_or(PAGE_EDGE)
+    let pixels = if desired_pixels.is_finite() {
+        desired_pixels.max(1.0)
+    } else {
+        1152.0
+    };
+    BUCKETS
+        .into_iter()
+        .find(|&edge| edge as f32 >= pixels)
+        .unwrap_or(PAGE_EDGE)
 }
 
 /// A clickable internal destination within one rendered PDF page.
@@ -46,12 +53,18 @@ fn internal_page(href: &str, total: u32) -> Option<u32> {
     let (file, fragment) = href.rsplit_once('#')?;
     // pdftohtml resolves PDF GoTo destinations to same-document .html#PAGE links.
     // Do not treat an external URL with a numeric anchor as a PDF page jump.
-    if file.contains("://") || file.contains('/') || file.contains('\\')
-        || (!file.is_empty() && !file.to_ascii_lowercase().ends_with(".html")) {
+    if file.contains("://")
+        || file.contains('/')
+        || file.contains('\\')
+        || (!file.is_empty() && !file.to_ascii_lowercase().ends_with(".html"))
+    {
         return None;
     }
     let number = fragment.strip_prefix("page=").unwrap_or(fragment);
-    number.parse::<u32>().ok().filter(|page| (1..=total).contains(page))
+    number
+        .parse::<u32>()
+        .ok()
+        .filter(|page| (1..=total).contains(page))
 }
 
 fn parse_page_links(xml: &str, page: u32, total: u32) -> Vec<PdfLink> {
@@ -59,9 +72,13 @@ fn parse_page_links(xml: &str, page: u32, total: u32) -> Vec<PdfLink> {
     let mut remaining = xml;
     while let Some(start) = remaining.find("<page ") {
         remaining = &remaining[start..];
-        let Some(header_end) = remaining.find('>') else { break };
+        let Some(header_end) = remaining.find('>') else {
+            break;
+        };
         let header = &remaining[..header_end];
-        let Some(end) = remaining.find("</page>") else { break };
+        let Some(end) = remaining.find("</page>") else {
+            break;
+        };
         let page_content = &remaining[header_end + 1..end];
         remaining = &remaining[end + "</page>".len()..];
         if xml_attr(header, "number").and_then(|v| v.parse::<u32>().ok()) != Some(page) {
@@ -69,17 +86,27 @@ fn parse_page_links(xml: &str, page: u32, total: u32) -> Vec<PdfLink> {
         }
         let width = xml_attr(header, "width").and_then(|v| v.parse::<f32>().ok());
         let height = xml_attr(header, "height").and_then(|v| v.parse::<f32>().ok());
-        let (Some(width), Some(height)) = (width, height) else { break };
+        let (Some(width), Some(height)) = (width, height) else {
+            break;
+        };
         if !width.is_finite() || !height.is_finite() || width <= 0.0 || height <= 0.0 {
             break;
         }
-        let page_left = xml_attr(header, "left").and_then(|v| v.parse().ok()).unwrap_or(0.0);
-        let page_top = xml_attr(header, "top").and_then(|v| v.parse().ok()).unwrap_or(0.0);
+        let page_left = xml_attr(header, "left")
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(0.0);
+        let page_top = xml_attr(header, "top")
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(0.0);
         let mut text = page_content;
         while let Some(text_start) = text.find("<text ") {
             text = &text[text_start..];
-            let Some(text_header_end) = text.find('>') else { break };
-            let Some(text_end) = text.find("</text>") else { break };
+            let Some(text_header_end) = text.find('>') else {
+                break;
+            };
+            let Some(text_end) = text.find("</text>") else {
+                break;
+            };
             let text_header = &text[..text_header_end];
             let body = &text[text_header_end + 1..text_end];
             text = &text[text_end + "</text>".len()..];
@@ -94,19 +121,30 @@ fn parse_page_links(xml: &str, page: u32, total: u32) -> Vec<PdfLink> {
                 ((left + box_width - page_left) / width).clamp(0.0, 1.0),
                 ((top + box_height - page_top) / height).clamp(0.0, 1.0),
             ];
-            if !bounds.iter().all(|n| n.is_finite()) || bounds[2] <= bounds[0] || bounds[3] <= bounds[1] {
+            if !bounds.iter().all(|n| n.is_finite())
+                || bounds[2] <= bounds[0]
+                || bounds[3] <= bounds[1]
+            {
                 continue;
             }
             let mut anchors = body;
             while let Some(anchor_start) = anchors.find("<a ") {
                 anchors = &anchors[anchor_start..];
-                let Some(anchor_header_end) = anchors.find('>') else { break };
+                let Some(anchor_header_end) = anchors.find('>') else {
+                    break;
+                };
                 let anchor_header = &anchors[..anchor_header_end];
                 anchors = &anchors[anchor_header_end + 1..];
-                let Some(target_page) = xml_attr(anchor_header, "href")
-                    .and_then(|href| internal_page(href, total)) else { continue };
+                let Some(target_page) =
+                    xml_attr(anchor_header, "href").and_then(|href| internal_page(href, total))
+                else {
+                    continue;
+                };
                 links.push(PdfLink {
-                    left: bounds[0], top: bounds[1], right: bounds[2], bottom: bounds[3],
+                    left: bounds[0],
+                    top: bounds[1],
+                    right: bounds[2],
+                    bottom: bounds[3],
                     target_page,
                 });
             }
@@ -126,11 +164,24 @@ pub fn page_links(
     expected: u64,
 ) -> Result<Vec<PdfLink>, String> {
     let mut command = Command::new(program("pdftohtml"));
-    command.args(["-q", "-xml", "-noroundcoord", "-i", "-f", &page.to_string(), "-l",
-        &page.to_string(), "-stdout"]);
+    command.args([
+        "-q",
+        "-xml",
+        "-noroundcoord",
+        "-i",
+        "-f",
+        &page.to_string(),
+        "-l",
+        &page.to_string(),
+        "-stdout",
+    ]);
     command.arg(path);
     let bytes = execute(command, generation, expected)?;
-    Ok(parse_page_links(&String::from_utf8_lossy(&bytes), page, total))
+    Ok(parse_page_links(
+        &String::from_utf8_lossy(&bytes),
+        page,
+        total,
+    ))
 }
 
 fn program(name: &str) -> PathBuf {
@@ -265,11 +316,16 @@ pub fn raster(
     // Cached reading pages are keyed by file fingerprint, page AND resolution.
     // The original thumbnail cache filename is preserved for backward compatibility.
     let cached = key(path).ok().map(|key| {
-        if thumb { cache.join(format!("{key}.png")) }
-        else { cache.join(format!("{key}-p{page}-e{edge}.png")) }
+        if thumb {
+            cache.join(format!("{key}.png"))
+        } else {
+            cache.join(format!("{key}-p{page}-e{edge}.png"))
+        }
     });
     if let Some(p) = &cached {
-        if let Ok(image) = decode(p) { return Ok(image); }
+        if let Ok(image) = decode(p) {
+            return Ok(image);
+        }
     }
     // Cache failure must never prevent viewing a document.
     let temp = tempfile::tempdir().map_err(|e| e.to_string())?;
@@ -296,7 +352,8 @@ pub fn raster(
             // Write a unique temporary file and atomically rename it into the cache.
             // Interrupted rendering never leaves a partial PNG at its final name.
             let temp_name = cache.join(format!(
-                "{}.{}.tmp", p.file_name().unwrap_or_default().to_string_lossy(),
+                "{}.{}.tmp",
+                p.file_name().unwrap_or_default().to_string_lossy(),
                 std::process::id()
             ));
             if fs::copy(&output, &temp_name).is_ok() {

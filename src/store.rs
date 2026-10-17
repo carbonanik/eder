@@ -100,7 +100,8 @@ impl Store {
             conn.execute(
                 "ALTER TABLE docs ADD COLUMN scroll_fraction REAL NOT NULL DEFAULT 0.0",
                 [],
-            ).map_err(|e| e.to_string())?;
+            )
+            .map_err(|e| e.to_string())?;
         }
         Ok(Self { conn })
     }
@@ -146,12 +147,15 @@ impl Store {
     }
     pub fn save_reading_position(&self, p: &Path, position: ReadingPosition) -> Result<(), String> {
         let position = ReadingPosition::new(position.page, position.fraction);
-        self.conn.execute(
-            "INSERT INTO docs(path,page,scroll_fraction) VALUES(?1,?2,?3) \
+        self.conn
+            .execute(
+                "INSERT INTO docs(path,page,scroll_fraction) VALUES(?1,?2,?3) \
              ON CONFLICT(path) DO UPDATE SET \
              page=excluded.page, scroll_fraction=excluded.scroll_fraction",
-            params![encode(p), position.page, position.fraction],
-        ).map(|_| ()).map_err(|e| e.to_string())
+                params![encode(p), position.page, position.fraction],
+            )
+            .map(|_| ())
+            .map_err(|e| e.to_string())
     }
     pub fn opened(&mut self, p: &Path, recovery: bool) -> Result<(), String> {
         let tx = self.conn.transaction().map_err(|e| e.to_string())?;
@@ -217,12 +221,22 @@ mod tests {
         let anchor = ReadingPosition::new(12, 0.5);
         let offset = anchor.scroll_offset(800.0);
         assert!((offset - 9_200.0).abs() < 0.01);
-        assert_eq!(ReadingPosition::from_scroll_offset(offset, 800.0, 100), anchor);
-        assert_eq!(ReadingPosition::from_scroll_offset(anchor.scroll_offset(1600.0),
-            1600.0, 100), anchor);
-        assert_eq!(ReadingPosition::new(0, f32::NAN), ReadingPosition::new(1, 0.0));
-        assert_eq!(ReadingPosition::from_scroll_offset(-10.0, 800.0, 10),
-            ReadingPosition::new(1, 0.0));
+        assert_eq!(
+            ReadingPosition::from_scroll_offset(offset, 800.0, 100),
+            anchor
+        );
+        assert_eq!(
+            ReadingPosition::from_scroll_offset(anchor.scroll_offset(1600.0), 1600.0, 100),
+            anchor
+        );
+        assert_eq!(
+            ReadingPosition::new(0, f32::NAN),
+            ReadingPosition::new(1, 0.0)
+        );
+        assert_eq!(
+            ReadingPosition::from_scroll_offset(-10.0, 800.0, 10),
+            ReadingPosition::new(1, 0.0)
+        );
     }
 
     #[test]
@@ -231,21 +245,38 @@ mod tests {
         let db = dir.path().join("legacy.sqlite3");
         let pdf = dir.path().join("book.pdf");
         let conn = Connection::open(&db).unwrap();
-        conn.execute_batch("CREATE TABLE docs(path BLOB PRIMARY KEY, page INTEGER NOT NULL DEFAULT 1,
+        conn.execute_batch(
+            "CREATE TABLE docs(path BLOB PRIMARY KEY, page INTEGER NOT NULL DEFAULT 1,
             favorite INTEGER NOT NULL DEFAULT 0, opened INTEGER);
-            CREATE TABLE settings(key TEXT PRIMARY KEY, value BLOB NOT NULL);").unwrap();
-        conn.execute("INSERT INTO docs(path,page,favorite) VALUES (?1,8,1)",
-            [encode(&pdf)]).unwrap();
+            CREATE TABLE settings(key TEXT PRIMARY KEY, value BLOB NOT NULL);",
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO docs(path,page,favorite) VALUES (?1,8,1)",
+            [encode(&pdf)],
+        )
+        .unwrap();
         drop(conn);
         let store = Store::open(&db).unwrap();
-        assert_eq!(store.reading_position(&pdf).unwrap(), ReadingPosition::new(8, 0.0));
-        store.save_reading_position(&pdf, ReadingPosition::new(8, 0.625)).unwrap();
+        assert_eq!(
+            store.reading_position(&pdf).unwrap(),
+            ReadingPosition::new(8, 0.0)
+        );
+        store
+            .save_reading_position(&pdf, ReadingPosition::new(8, 0.625))
+            .unwrap();
         drop(store);
         let store = Store::open(&db).unwrap();
-        assert_eq!(store.reading_position(&pdf).unwrap(), ReadingPosition::new(8, 0.625));
+        assert_eq!(
+            store.reading_position(&pdf).unwrap(),
+            ReadingPosition::new(8, 0.625)
+        );
         assert_eq!(store.snapshot().unwrap().favorites, [pdf.clone()]);
         store.save_position(&pdf, 9).unwrap();
-        assert_eq!(store.reading_position(&pdf).unwrap(), ReadingPosition::new(9, 0.0));
+        assert_eq!(
+            store.reading_position(&pdf).unwrap(),
+            ReadingPosition::new(9, 0.0)
+        );
     }
 
     #[test]
