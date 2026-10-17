@@ -59,6 +59,7 @@ enum Event {
 struct PageJob {
     path: PathBuf,
     page: u32,
+    total: u32,
     dark: bool,
     id: u64,
 }
@@ -66,6 +67,7 @@ struct PageResult {
     id: u64,
     page: u32,
     result: Result<image::RgbaImage, String>,
+    links: Vec<render::PdfLink>,
 }
 struct ThumbJob {
     path: PathBuf,
@@ -83,7 +85,7 @@ struct Reader {
     texture: Option<TextureHandle>,
     loading: bool,
     zoom: f32,
-    cache: VecDeque<(u32, bool, TextureHandle)>,
+    cache: VecDeque<(u32, bool, TextureHandle, Vec<render::PdfLink>)>,
     pending_page: Option<u32>,
     queued_pages: VecDeque<u32>,
     failed: HashSet<u32>,
@@ -301,12 +303,21 @@ impl Folio {
                         }
                     }
                 }
+                // Resolve clickable internal PDF index links outside the UI thread.
+                // A missing pdftohtml only disables links, never the page image.
+                let links = if result.is_ok() && gen.load(Ordering::Acquire) == job.id {
+                    render::page_links(&job.path, job.page, job.total, &gen, job.id)
+                        .unwrap_or_default()
+                } else {
+                    Vec::new()
+                };
                 if gen.load(Ordering::Acquire) == job.id {
                     if page_tx
                         .send(PageResult {
                             id: job.id,
                             page: job.page,
                             result,
+                            links,
                         })
                         .is_err()
                     {
@@ -413,7 +424,7 @@ impl Folio {
             if let Some(index) = r
                 .cache
                 .iter()
-                .position(|(page, dark, _)| *page == r.page && *dark == self.state.dark)
+                .position(|(page, dark, _, _)| *page == r.page && *dark == self.state.dark)
             {
                 let cached = r.cache.remove(index).unwrap();
                 r.texture = Some(cached.2.clone());
@@ -426,6 +437,7 @@ impl Folio {
             *self.pages.0.lock().unwrap() = Some(PageJob {
                 path: r.path.clone(),
                 page: r.page,
+                total: r.total,
                 dark: self.state.dark,
                 id,
             });
@@ -471,7 +483,7 @@ impl Folio {
                 || reader
                     .cache
                     .iter()
-                    .any(|(cached_page, dark, _)| *cached_page == page && *dark == self.state.dark)
+                    .any(|(cached_page, dark, _, _)| *cached_page == page && *dark == self.state.dark)
             {
                 continue;
             }
@@ -492,6 +504,7 @@ impl Folio {
             *self.pages.0.lock().unwrap() = Some(PageJob {
                 path: reader.path.clone(),
                 page,
+                total: reader.total,
                 dark: self.state.dark,
                 id,
             });
@@ -612,11 +625,11 @@ impl Folio {
                     match result.result {
                         Ok(image) => {
                             let t = texture(ctx, "page", image);
-                            r.cache.push_back((result.page, self.state.dark, t.clone()));
+                            r.cache.push_back((result.page, self.state.dark, t.clone(), result.links));
                             while r
                                 .cache
                                 .iter()
-                                .map(|(_, _, t)| t.size()[0] * t.size()[1] * 4)
+                                .map(|(_, _, t, _)| t.size()[0] * t.size()[1] * 4)
                                 .sum::<usize>()
                                 > 128 * 1024 * 1024
                             {
@@ -759,7 +772,7 @@ impl Folio {
         ui.separator();
         ui.label("Local storage only · No account · No document uploads");
         ui.label(
-            "PDF rendering requires Poppler (pdfinfo + pdftoppm). See the included setup guide.",
+            "PDF rendering requires Poppler (pdfinfo + pdftoppm); clickable index links also require pdftohtml.",
         );
     }
     // Keep the grid responsive and virtualize rows rather than individual documents.
@@ -1111,6 +1124,7 @@ impl Folio {
                 return;
             }
         }
+        let mut internal_jump = None;
         egui::CentralPanel::default()
             .frame(
                 egui::Frame::none()
@@ -1144,7 +1158,12 @@ impl Folio {
                         .show(ui, |ui| {
                             ui.horizontal(|ui| {
                                 ui.add_space(((ui.available_width() - size.x) / 2.0).max(0.0));
-                                ui.add(egui::Image::new(t).fit_to_exact_size(size));
+                                let image = ui.add(egui::Image::new(t).fit_to_exact_size(size));
+                                if let Some((_, _, _, links)) = r.cache.iter().find(
+                                    |(page, dark, _, _)| *page == r.page && *dark == self.state.dark
+                                ) {
+                                    internal_jump = clicked_pdf_link(ui, image.rect, r.page, links);
+                                }
                             });
                         });
                 } else {
@@ -1154,6 +1173,9 @@ impl Folio {
                     }
                 }
             });
+        if let Some(target) = internal_jump {
+            self.turn(target);
+        }
     }
     fn continuous_reader_ui(&mut self, ui: &mut egui::Ui) {
         let (total, zoom) = {
@@ -1177,6 +1199,7 @@ impl Folio {
         let mut first_visible = None;
         let mut visible_pages = Vec::new();
         let mut retry_page = None;
+        let mut internal_jump = None;
         let mut draw_pages = |ui: &mut egui::Ui, range: std::ops::Range<usize>| {
             first_visible = range
                 .start
@@ -1189,8 +1212,8 @@ impl Folio {
                 let texture = reader
                     .cache
                     .iter()
-                    .find(|(cached_page, dark, _)| *cached_page == page && *dark == self.state.dark)
-                    .map(|(_, _, texture)| texture.clone());
+                    .find(|(cached_page, dark, _, _)| *cached_page == page && *dark == self.state.dark)
+                    .map(|(_, _, texture, _)| texture.clone());
                 let failed = reader.failed.contains(&page);
                 ui.allocate_ui_with_layout(
                     Vec2::new(ui.available_width(), row_height),
@@ -1204,7 +1227,14 @@ impl Folio {
                             let scale = (available * zoom / image_size.x)
                                 .min(available_height / image_size.y);
                             let image_size = image_size * scale;
-                            ui.add(egui::Image::new(&texture).fit_to_exact_size(image_size));
+                            let image = ui.add(egui::Image::new(&texture).fit_to_exact_size(image_size));
+                            if let Some((_, _, _, links)) = reader.cache.iter().find(
+                                |(cached_page, dark, _, _)| *cached_page == page && *dark == self.state.dark
+                            ) {
+                                if let Some(target) = clicked_pdf_link(ui, image.rect, page, links) {
+                                    internal_jump = Some(target);
+                                }
+                            }
                         } else if failed {
                             ui.label("This page could not be rendered.");
                             if ui.button("Retry page").clicked() {
@@ -1247,8 +1277,54 @@ impl Folio {
             visible_pages.push(page);
         }
         self.queue_continuous_pages(&visible_pages);
+        if let Some(target) = internal_jump {
+            self.turn(target);
+        }
     }
 }
+/// Link overlays align Poppler's normalized text bounds to the fitted page image.
+/// Only text with a real, internal PDF link is interactive; visible text is unchanged.
+fn clicked_pdf_link(
+    ui: &mut egui::Ui,
+    image_rect: egui::Rect,
+    page: u32,
+    links: &[render::PdfLink],
+) -> Option<u32> {
+    let mut destination = None;
+    for (index, link) in links.iter().enumerate() {
+        let min = egui::pos2(
+            image_rect.left() + link.left * image_rect.width(),
+            image_rect.top() + link.top * image_rect.height(),
+        );
+        let max = egui::pos2(
+            image_rect.left() + link.right * image_rect.width(),
+            image_rect.top() + link.bottom * image_rect.height(),
+        );
+        let rect = egui::Rect::from_min_max(min, max)
+            .expand(2.0)
+            .intersect(image_rect)
+            .intersect(ui.clip_rect());
+        if rect.width() <= 0.0 || rect.height() <= 0.0 {
+            continue;
+        }
+        let response = ui
+            .interact(rect, ui.id().with(("pdf-link", page, index)), egui::Sense::click())
+            .on_hover_cursor(egui::CursorIcon::PointingHand)
+            .on_hover_text(format!("Go to page {}", link.target_page));
+        if response.hovered() {
+            ui.painter().rect_filled(
+                rect,
+                2.0,
+                Color32::from_rgba_unmultiplied(34, 129, 111, 34),
+            );
+        }
+        if response.clicked() {
+            destination = Some(link.target_page);
+        }
+    }
+    destination
+}
+
 fn texture(ctx: &egui::Context, name: &str, image: image::RgbaImage) -> TextureHandle {
     let size = [image.width() as usize, image.height() as usize];
     ctx.load_texture(
