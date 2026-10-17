@@ -12,7 +12,7 @@ use std::{
         mpsc::{self, Receiver, SyncSender},
         Arc, Condvar, Mutex,
     },
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -56,19 +56,42 @@ enum Event {
     ReadingMode(bool),
     Closed,
 }
+const PAGE_CACHE_BUDGET: usize = 160 * 1024 * 1024;
+const POSITION_SAVE_DELAY: Duration = Duration::from_millis(650);
+
 struct PageJob {
     path: PathBuf,
     page: u32,
-    total: u32,
+    edge: u32,
     dark: bool,
     id: u64,
 }
 struct PageResult {
     id: u64,
     page: u32,
-    result: Result<image::RgbaImage, String>,
+    edge: u32,
+    dark: bool,
+    // RGBA -> egui conversion is finished on the worker, not during a UI frame.
+    result: Result<egui::ColorImage, String>,
+}
+struct LinkJob {
+    path: PathBuf,
+    page: u32,
+    total: u32,
+    id: u64,
+}
+struct LinkResult {
+    id: u64,
+    page: u32,
     links: Vec<render::PdfLink>,
 }
+struct CachedPage {
+    page: u32,
+    dark: bool,
+    edge: u32,
+    texture: TextureHandle,
+}
+
 struct ThumbJob {
     path: PathBuf,
     id: u64,
@@ -76,7 +99,7 @@ struct ThumbJob {
 struct ThumbResult {
     path: PathBuf,
     id: u64,
-    image: Option<image::RgbaImage>,
+    image: Option<egui::ColorImage>,
 }
 struct Reader {
     path: PathBuf,
@@ -85,7 +108,12 @@ struct Reader {
     texture: Option<TextureHandle>,
     loading: bool,
     zoom: f32,
-    cache: VecDeque<(u32, bool, TextureHandle, Vec<render::PdfLink>)>,
+    cache: VecDeque<CachedPage>,
+    links: HashMap<u32, Vec<render::PdfLink>>,
+    link_pending: HashSet<u32>,
+    target_edge: u32,
+    last_visible_page: Option<u32>,
+    position_changed_at: Option<Instant>,
     pending_page: Option<u32>,
     queued_pages: VecDeque<u32>,
     failed: HashSet<u32>,
@@ -97,6 +125,9 @@ pub struct Folio {
     tx: SyncSender<Task>,
     rx: Receiver<Event>,
     page_rx: Receiver<PageResult>,
+    link_tx: SyncSender<LinkJob>,
+    link_rx: Receiver<LinkResult>,
+    link_gen: Arc<AtomicU64>,
     thumb_tx: SyncSender<ThumbJob>,
     thumb_rx: Receiver<ThumbResult>,
     pages: Arc<(Mutex<Option<PageJob>>, Condvar)>,
@@ -278,52 +309,87 @@ impl Folio {
         let page_gen = Arc::new(AtomicU64::new(0));
         let pages = Arc::new((Mutex::new(None::<PageJob>), Condvar::new()));
         let (page_tx, page_rx) = mpsc::sync_channel(1);
+        // Cache maintenance runs on its own worker so scanning disk never delays a page.
+        let (cache_maint_tx, cache_maint_rx) = mpsc::sync_channel::<()>(1);
+        {
+            let cache = cache.clone();
+            std::thread::spawn(move || {
+                while cache_maint_rx.recv().is_ok() {
+                    let _ = render::trim_cache(&cache, render::DISK_BUDGET);
+                }
+            });
+        }
+        let _ = cache_maint_tx.try_send(());
         {
             let slot = pages.clone();
             let gen = page_gen.clone();
             let cache = cache.clone();
+            let cache_maint_tx = cache_maint_tx.clone();
             let ctx = cc.egui_ctx.clone();
-            std::thread::spawn(move || loop {
-                let job = {
-                    let (lock, cv) = &*slot;
-                    let mut value = lock.lock().unwrap();
-                    while value.is_none() {
-                        value = cv.wait(value).unwrap();
-                    }
-                    value.take().unwrap()
-                };
-                let mut result =
-                    render::raster(&job.path, job.page, render::PAGE_EDGE, &cache, &gen, job.id);
-                if let Ok(image) = &mut result {
-                    if job.dark {
-                        for pixel in image.pixels_mut() {
-                            pixel[0] = 255 - pixel[0];
-                            pixel[1] = 255 - pixel[1];
-                            pixel[2] = 255 - pixel[2];
+            std::thread::spawn(move || {
+                let mut render_count = 0_usize;
+                loop {
+                    let job = {
+                        let (lock, cv) = &*slot;
+                        let mut value = lock.lock().unwrap();
+                        while value.is_none() {
+                            value = cv.wait(value).unwrap();
+                        }
+                        value.take().unwrap()
+                    };
+                    let mut result = render::raster(
+                        &job.path, job.page, job.edge, &cache, &gen, job.id,
+                    );
+                    if let Ok(image) = &mut result {
+                        if job.dark {
+                            for pixel in image.pixels_mut() {
+                                pixel[0] = 255 - pixel[0];
+                                pixel[1] = 255 - pixel[1];
+                                pixel[2] = 255 - pixel[2];
+                            }
                         }
                     }
-                }
-                // Resolve clickable internal PDF index links outside the UI thread.
-                // A missing pdftohtml only disables links, never the page image.
-                let links = if result.is_ok() && gen.load(Ordering::Acquire) == job.id {
-                    render::page_links(&job.path, job.page, job.total, &gen, job.id)
-                        .unwrap_or_default()
-                } else {
-                    Vec::new()
-                };
-                if gen.load(Ordering::Acquire) == job.id {
-                    if page_tx
-                        .send(PageResult {
-                            id: job.id,
-                            page: job.page,
-                            result,
-                            links,
-                        })
-                        .is_err()
-                    {
-                        break;
+                    // Avoid building a multi-megabyte ColorImage on the egui thread.
+                    let result = result.map(color_image);
+                    if gen.load(Ordering::Acquire) == job.id {
+                        if page_tx.send(PageResult {
+                            id: job.id, page: job.page, edge: job.edge,
+                            dark: job.dark, result,
+                        }).is_err() {
+                            break;
+                        }
+                        ctx.request_repaint();
                     }
-                    ctx.request_repaint();
+                    render_count += 1;
+                    if render_count % 24 == 0 {
+                        let _ = cache_maint_tx.try_send(());
+                    }
+                }
+            });
+        }
+        // Link metadata uses a separate worker; pdftohtml must never gate an image.
+        let link_gen = Arc::new(AtomicU64::new(0));
+        let (link_tx, link_jobs) = mpsc::sync_channel::<LinkJob>(12);
+        let (link_results, link_rx) = mpsc::sync_channel::<LinkResult>(8);
+        {
+            let gen = link_gen.clone();
+            let ctx = cc.egui_ctx.clone();
+            std::thread::spawn(move || {
+                while let Ok(job) = link_jobs.recv() {
+                    if gen.load(Ordering::Acquire) != job.id {
+                        continue;
+                    }
+                    let links = render::page_links(
+                        &job.path, job.page, job.total, &gen, job.id,
+                    ).unwrap_or_default();
+                    if gen.load(Ordering::Acquire) == job.id {
+                        if link_results.send(LinkResult {
+                            id: job.id, page: job.page, links,
+                        }).is_err() {
+                            break;
+                        }
+                        ctx.request_repaint();
+                    }
                 }
             });
         }
@@ -334,13 +400,13 @@ impl Folio {
             let gen = thumb_gen.clone();
             let ctx = cc.egui_ctx.clone();
             std::thread::spawn(move || {
-                let _ = render::trim_cache(&cache, render::DISK_BUDGET);
                 while let Ok(job) = thumb_jobs.recv() {
                     if gen.load(Ordering::Acquire) != job.id {
                         continue;
                     }
-                    let image =
-                        render::raster(&job.path, 1, render::THUMB_EDGE, &cache, &gen, job.id).ok();
+                    let image = render::raster(
+                        &job.path, 1, render::THUMB_EDGE, &cache, &gen, job.id,
+                    ).ok().map(color_image);
                     if gen.load(Ordering::Acquire) == job.id {
                         if thumb_results
                             .send(ThumbResult {
@@ -362,6 +428,9 @@ impl Folio {
             tx,
             rx,
             page_rx,
+            link_tx,
+            link_rx,
+            link_gen,
             thumb_tx,
             thumb_rx,
             pages,
@@ -416,77 +485,131 @@ impl Folio {
         self.thumb_gen.fetch_add(1, Ordering::AcqRel);
         self.pending.clear();
     }
+    // Select quality by physical display pixels, rather than always rasterizing 2400px.
+    // Buckets prevent tiny window/zoom changes from causing a new render.
+    fn page_edge(viewport: Vec2, zoom: f32, pixels_per_point: f32, continuous: bool) -> u32 {
+        let long_side_points = if continuous {
+            viewport.x.max(1.0) * 1.42 * zoom
+        } else {
+            // A fitted page is generally portrait. Account for widescreen/landscape too.
+            viewport.y.max(viewport.x * 0.85) * zoom
+        };
+        let desired = long_side_points * pixels_per_point * 1.12;
+        render::edge_bucket(desired)
+    }
+    fn set_page_edge(&mut self, edge: u32) {
+        let Some(reader) = &mut self.reader else { return };
+        if reader.target_edge == edge { return; }
+        reader.target_edge = edge;
+        if self.state.continuous_scroll {
+            // Keep low-resolution cached pages visible while better versions arrive.
+            self.page_gen.fetch_add(1, Ordering::AcqRel);
+            reader.pending_page = None;
+            reader.queued_pages.clear();
+        } else {
+            self.render();
+        }
+    }
     fn render(&mut self) {
-        if let Some(r) = &mut self.reader {
-            let id = self.page_gen.fetch_add(1, Ordering::AcqRel) + 1;
-            r.pending_page = None;
-            r.failed.remove(&r.page);
-            if let Some(index) = r
-                .cache
-                .iter()
-                .position(|(page, dark, _, _)| *page == r.page && *dark == self.state.dark)
-            {
-                let cached = r.cache.remove(index).unwrap();
-                r.texture = Some(cached.2.clone());
-                r.cache.push_back(cached);
+        let Some(r) = &mut self.reader else { return };
+        let id = self.page_gen.fetch_add(1, Ordering::AcqRel) + 1;
+        r.pending_page = None;
+        r.queued_pages.clear();
+        r.failed.remove(&r.page);
+        let best_index = r.cache.iter().enumerate()
+            .filter(|(_, item)| item.page == r.page && item.dark == self.state.dark)
+            .max_by_key(|(_, item)| item.edge).map(|(i, _)| i);
+        if let Some(index) = best_index {
+            let item = r.cache.remove(index).unwrap();
+            let suitable = item.edge >= r.target_edge;
+            r.texture = Some(item.texture.clone());
+            r.cache.push_back(item);
+            if suitable {
                 r.loading = false;
                 return;
             }
-            r.loading = true;
+        } else {
             r.texture = None;
-            *self.pages.0.lock().unwrap() = Some(PageJob {
-                path: r.path.clone(),
-                page: r.page,
-                total: r.total,
-                dark: self.state.dark,
-                id,
-            });
-            self.pages.1.notify_one();
+        }
+        // During a quality upgrade, keep displaying the already available texture.
+        r.loading = r.texture.is_none();
+        r.pending_page = Some(r.page);
+        *self.pages.0.lock().unwrap() = Some(PageJob {
+            path: r.path.clone(), page: r.page,
+            edge: r.target_edge, dark: self.state.dark, id,
+        });
+        self.pages.1.notify_one();
+    }
+    fn position_changed(&mut self, page: u32) {
+        if let Some(reader) = &mut self.reader {
+            if page != reader.page {
+                reader.page = page;
+                reader.position_changed_at = Some(Instant::now());
+            }
+        }
+    }
+    fn flush_position_if_idle(&mut self, ctx: &egui::Context) {
+        let pending = self.reader.as_ref().and_then(|reader| {
+            reader.position_changed_at.map(|changed| (
+                reader.path.clone(), reader.page, changed,
+            ))
+        });
+        if let Some((path, page, changed)) = pending {
+            if changed.elapsed() >= POSITION_SAVE_DELAY {
+                if self.send(Task::Position(path, page, false)) {
+                    if let Some(reader) = &mut self.reader {
+                        reader.position_changed_at = None;
+                    }
+                }
+            } else {
+                ctx.request_repaint_after(POSITION_SAVE_DELAY.saturating_sub(changed.elapsed()));
+            }
         }
     }
     fn turn(&mut self, page: u32) {
-        if let Some(r) = &self.reader {
-            let page = page.clamp(1, r.total);
-            if page != r.page && self.send(Task::Position(r.path.clone(), page, false)) {
-                self.reader.as_mut().unwrap().page = page;
-                if self.state.continuous_scroll {
-                    self.reader.as_mut().unwrap().scroll_to_page = Some(page);
-                } else {
-                    self.render();
-                }
-            }
+        let Some(r) = &self.reader else { return };
+        let page = page.clamp(1, r.total);
+        if page == r.page { return; }
+        self.position_changed(page);
+        if self.state.continuous_scroll {
+            self.reader.as_mut().unwrap().scroll_to_page = Some(page);
+        } else {
+            self.render();
         }
     }
     fn queue_continuous_pages(&mut self, visible: &[u32]) {
-        let Some(reader) = &mut self.reader else {
-            return;
-        };
-        let Some(first) = visible.iter().copied().min() else {
-            return;
-        };
+        let Some(reader) = &mut self.reader else { return };
+        let Some(first) = visible.iter().copied().min() else { return };
         let last = visible.iter().copied().max().unwrap();
-        let mut requested = visible.to_vec();
-        for distance in 1..=2 {
-            if first > distance {
-                requested.push(first - distance);
-            }
-            if last.saturating_add(distance) <= reader.total {
-                requested.push(last + distance);
+        // Cancel a render that is now far away after a fast scroll or page jump.
+        if reader.pending_page.is_some_and(|pending| {
+            pending.saturating_add(4) < first || pending > last.saturating_add(4)
+        }) {
+            self.page_gen.fetch_add(1, Ordering::AcqRel);
+            reader.pending_page = None;
+            reader.queued_pages.clear();
+        }
+        let forward = reader.last_visible_page.map_or(true, |previous| first >= previous);
+        reader.last_visible_page = Some(first);
+        let mut desired = visible.to_vec();
+        // Prefetch in scroll direction first; never spend the pipeline on distant pages.
+        for distance in 1..=3 {
+            let ahead = last.saturating_add(distance);
+            let behind = first.checked_sub(distance);
+            let pair = if forward { [Some(ahead), behind] } else { [behind, Some(ahead)] };
+            for page in pair.into_iter().flatten() {
+                if (1..=reader.total).contains(&page) && !desired.contains(&page) {
+                    desired.push(page);
+                }
             }
         }
-        let desired: HashSet<_> = requested.iter().copied().collect();
-        reader.queued_pages.retain(|page| desired.contains(page));
-        for page in requested {
+        reader.queued_pages.clear();
+        for page in desired {
             if reader.pending_page == Some(page)
-                || reader.queued_pages.contains(&page)
                 || reader.failed.contains(&page)
-                || reader
-                    .cache
-                    .iter()
-                    .any(|(cached_page, dark, _, _)| *cached_page == page && *dark == self.state.dark)
-            {
-                continue;
-            }
+                || reader.cache.iter().any(|item| item.page == page
+                    && item.dark == self.state.dark && item.edge >= reader.target_edge)
+            { continue; }
             reader.queued_pages.push_back(page);
         }
         self.dispatch_continuous_page();
@@ -494,21 +617,25 @@ impl Folio {
     fn dispatch_continuous_page(&mut self) {
         let id = self.page_gen.load(Ordering::Acquire);
         if let Some(reader) = &mut self.reader {
-            if reader.pending_page.is_some() {
-                return;
-            }
-            let Some(page) = reader.queued_pages.pop_front() else {
-                return;
-            };
+            if reader.pending_page.is_some() { return; }
+            let Some(page) = reader.queued_pages.pop_front() else { return };
             reader.pending_page = Some(page);
             *self.pages.0.lock().unwrap() = Some(PageJob {
-                path: reader.path.clone(),
-                page,
-                total: reader.total,
-                dark: self.state.dark,
-                id,
+                path: reader.path.clone(), page,
+                edge: reader.target_edge, dark: self.state.dark, id,
             });
             self.pages.1.notify_one();
+        }
+    }
+    fn queue_links(&mut self, page: u32) {
+        let Some(r) = &mut self.reader else { return };
+        if r.links.contains_key(&page) || !r.link_pending.insert(page) { return; }
+        let job = LinkJob {
+            path: r.path.clone(), page, total: r.total,
+            id: self.link_gen.load(Ordering::Acquire),
+        };
+        if self.link_tx.try_send(job).is_err() {
+            r.link_pending.remove(&page);
         }
     }
     fn back(&mut self) {
@@ -521,6 +648,7 @@ impl Folio {
             }
         }
         self.page_gen.fetch_add(1, Ordering::AcqRel);
+        self.link_gen.fetch_add(1, Ordering::AcqRel);
         self.reader = None;
         self.load();
     }
@@ -557,6 +685,8 @@ impl Folio {
                 Event::Open(path, page, total, id) => {
                     if id == self.open_gen.load(Ordering::Acquire) {
                         self.opening = false;
+                        self.page_gen.fetch_add(1, Ordering::AcqRel);
+                        self.link_gen.fetch_add(1, Ordering::AcqRel);
                         self.reader = Some(Reader {
                             path,
                             page,
@@ -565,6 +695,11 @@ impl Folio {
                             loading: true,
                             zoom: 1.0,
                             cache: VecDeque::new(),
+                            links: HashMap::new(),
+                            link_pending: HashSet::new(),
+                            target_edge: 1024,
+                            last_visible_page: None,
+                            position_changed_at: None,
                             pending_page: None,
                             queued_pages: VecDeque::new(),
                             failed: HashSet::new(),
@@ -573,9 +708,9 @@ impl Folio {
                         });
                         if self.state.continuous_scroll {
                             self.reader.as_mut().unwrap().loading = false;
-                        } else {
-                            self.render();
                         }
+                        // The first raster starts after the reader panel measures its
+                        // viewport; don't render the wrong resolution and cancel it.
                     }
                 }
                 Event::Recovery(p) => self.open(p, true),
@@ -613,52 +748,78 @@ impl Folio {
                 }
             }
         }
-        while let Ok(result) = self.page_rx.try_recv() {
+        // At most one GPU page upload per frame, avoiding bursts during rapid scroll.
+        if let Ok(result) = self.page_rx.try_recv() {
             if result.id == self.page_gen.load(Ordering::Acquire) {
+                let mut load_links = false;
                 if let Some(r) = &mut self.reader {
-                    if r.pending_page == Some(result.page) {
-                        r.pending_page = None;
-                    }
-                    if result.page == r.page {
-                        r.loading = false;
-                    }
+                    if r.pending_page == Some(result.page) { r.pending_page = None; }
                     match result.result {
                         Ok(image) => {
-                            let t = texture(ctx, "page", image);
-                            r.cache.push_back((result.page, self.state.dark, t.clone(), result.links));
-                            while r
-                                .cache
-                                .iter()
-                                .map(|(_, _, t, _)| t.size()[0] * t.size()[1] * 4)
-                                .sum::<usize>()
-                                > 128 * 1024 * 1024
-                            {
-                                r.cache.pop_front();
+                            let redundant = r.cache.iter().any(|item|
+                                item.page == result.page && item.dark == result.dark
+                                && item.edge >= result.edge);
+                            if !redundant {
+                                let t = ctx.load_texture("page", image, egui::TextureOptions::LINEAR);
+                                r.cache.retain(|item| !(item.page == result.page
+                                    && item.dark == result.dark && item.edge <= result.edge));
+                                r.cache.push_back(CachedPage {
+                                    page: result.page, dark: result.dark,
+                                    edge: result.edge, texture: t.clone(),
+                                });
+                                if result.page == r.page && result.dark == self.state.dark {
+                                    r.texture = Some(t);
+                                    r.loading = false;
+                                }
+                                // LRU budget; never evict the current viewport's pages.
+                                while r.cache.iter().map(|item|
+                                    item.texture.size()[0] * item.texture.size()[1] * 4
+                                ).sum::<usize>() > PAGE_CACHE_BUDGET {
+                                    let current = r.page;
+                                    let protected = r.last_visible_page.unwrap_or(current);
+                                    let first = protected.saturating_sub(2);
+                                    let last = protected.saturating_add(4);
+                                    let evict = r.cache.iter().position(|item|
+                                        item.page != current && !(first..=last).contains(&item.page));
+                                    if let Some(index) = evict { r.cache.remove(index); }
+                                    else { break; }
+                                }
                             }
-                            if result.page == r.page {
-                                r.texture = Some(t);
-                            }
+                            load_links = true;
                         }
                         Err(e) => {
                             r.failed.insert(result.page);
-                            self.message = Some((e, true));
+                            if result.page == r.page {
+                                r.loading = false;
+                                self.message = Some((e, true));
+                            }
                         }
                     }
+                }
+                if load_links { self.queue_links(result.page); }
+            }
+        }
+        // Independent metadata pipeline: no raster blocks on pdftohtml.
+        for _ in 0..8 {
+            let Ok(result) = self.link_rx.try_recv() else { break };
+            if result.id == self.link_gen.load(Ordering::Acquire) {
+                if let Some(r) = &mut self.reader {
+                    r.link_pending.remove(&result.page);
+                    r.links.insert(result.page, result.links);
                 }
             }
         }
         self.dispatch_continuous_page();
-        while let Ok(result) = self.thumb_rx.try_recv() {
-            if result.id == self.thumb_gen.load(Ordering::Acquire) {
-                self.pending.remove(&result.path);
-                self.touch(&result.path);
-                self.textures.insert(
-                    result.path,
-                    result.image.map(|i| texture(ctx, "preview", i)),
-                );
-                while self.lru.len() > 64 {
-                    if let Some(p) = self.lru.pop_front() {
-                        self.textures.remove(&p);
+        // Thumbnail upload is also limited to one per frame, and paused in the reader.
+        if self.reader.is_none() {
+            if let Ok(result) = self.thumb_rx.try_recv() {
+                if result.id == self.thumb_gen.load(Ordering::Acquire) {
+                    self.pending.remove(&result.path);
+                    self.touch(&result.path);
+                    self.textures.insert(result.path,
+                        result.image.map(|i| ctx.load_texture("preview", i, egui::TextureOptions::LINEAR)));
+                    while self.lru.len() > 64 {
+                        if let Some(p) = self.lru.pop_front() { self.textures.remove(&p); }
                     }
                 }
             }
@@ -1087,7 +1248,9 @@ impl Folio {
                     self.turn(page + 1);
                 }
                 if ui.button("Save Position").clicked() {
-                    self.send(Task::Position(path, page, true));
+                    if self.send(Task::Position(path, page, true)) {
+                        if let Some(r) = &mut self.reader { r.position_changed_at = None; }
+                    }
                 }
                 let mut dark = self.state.dark;
                 if ui.checkbox(&mut dark, "Dark pages").changed() {
@@ -1140,6 +1303,13 @@ impl Folio {
                     self.continuous_reader_ui(ui);
                     return;
                 }
+                let desired = Self::page_edge(ui.available_size(),
+                    self.reader.as_ref().unwrap().zoom, ui.ctx().pixels_per_point(), false);
+                self.set_page_edge(desired);
+                let r = self.reader.as_ref().unwrap();
+                if r.loading && r.pending_page.is_none() && r.texture.is_none() {
+                    self.render();
+                }
                 let r = self.reader.as_ref().unwrap();
                 if r.loading {
                     ui.centered_and_justified(|ui| {
@@ -1159,9 +1329,7 @@ impl Folio {
                             ui.horizontal(|ui| {
                                 ui.add_space(((ui.available_width() - size.x) / 2.0).max(0.0));
                                 let image = ui.add(egui::Image::new(t).fit_to_exact_size(size));
-                                if let Some((_, _, _, links)) = r.cache.iter().find(
-                                    |(page, dark, _, _)| *page == r.page && *dark == self.state.dark
-                                ) {
+                                if let Some(links) = r.links.get(&r.page) {
                                     internal_jump = clicked_pdf_link(ui, image.rect, r.page, links);
                                 }
                             });
@@ -1182,6 +1350,8 @@ impl Folio {
             let reader = self.reader.as_ref().unwrap();
             (reader.total, reader.zoom)
         };
+        let desired = Self::page_edge(ui.available_size(), zoom, ui.ctx().pixels_per_point(), true);
+        self.set_page_edge(desired);
         let row_height = (ui.available_width() * 1.42 * zoom).max(300.0);
         let row_stride = row_height + ui.spacing().item_spacing.y;
         let reader = self.reader.as_mut().unwrap();
@@ -1209,11 +1379,10 @@ impl Folio {
             for index in range {
                 let page = index as u32 + 1;
                 let reader = self.reader.as_ref().unwrap();
-                let texture = reader
-                    .cache
-                    .iter()
-                    .find(|(cached_page, dark, _, _)| *cached_page == page && *dark == self.state.dark)
-                    .map(|(_, _, texture, _)| texture.clone());
+                let texture = reader.cache.iter()
+                    .filter(|item| item.page == page && item.dark == self.state.dark)
+                    .max_by_key(|item| item.edge)
+                    .map(|item| item.texture.clone());
                 let failed = reader.failed.contains(&page);
                 ui.allocate_ui_with_layout(
                     Vec2::new(ui.available_width(), row_height),
@@ -1228,9 +1397,7 @@ impl Folio {
                                 .min(available_height / image_size.y);
                             let image_size = image_size * scale;
                             let image = ui.add(egui::Image::new(&texture).fit_to_exact_size(image_size));
-                            if let Some((_, _, _, links)) = reader.cache.iter().find(
-                                |(cached_page, dark, _, _)| *cached_page == page && *dark == self.state.dark
-                            ) {
+                            if let Some(links) = reader.links.get(&page) {
                                 if let Some(target) = clicked_pdf_link(ui, image.rect, page, links) {
                                     internal_jump = Some(target);
                                 }
@@ -1267,14 +1434,29 @@ impl Folio {
         drop(draw_pages);
 
         if let Some(page) = first_visible {
-            let reader = self.reader.as_ref().unwrap();
-            if page != reader.page && self.send(Task::Position(reader.path.clone(), page, false)) {
-                self.reader.as_mut().unwrap().page = page;
-            }
+            self.position_changed(page);
         }
         if let Some(page) = retry_page {
             self.reader.as_mut().unwrap().failed.remove(&page);
             visible_pages.push(page);
+        }
+        // Touch visible textures to keep actually-used pages at the back of the LRU.
+        if let Some(reader) = &mut self.reader {
+            for &page in &visible_pages {
+                if let Some(index) = reader.cache.iter().position(|item|
+                    item.page == page && item.dark == self.state.dark)
+                {
+                    let item = reader.cache.remove(index).unwrap();
+                    reader.cache.push_back(item);
+                }
+            }
+        }
+        // A full link-worker queue must not permanently lose link metadata.
+        // Retry it opportunistically for already-rendered visible pages.
+        for &page in &visible_pages {
+            if self.reader.as_ref().unwrap().cache.iter().any(|item| item.page == page) {
+                self.queue_links(page);
+            }
         }
         self.queue_continuous_pages(&visible_pages);
         if let Some(target) = internal_jump {
@@ -1325,13 +1507,9 @@ fn clicked_pdf_link(
     destination
 }
 
-fn texture(ctx: &egui::Context, name: &str, image: image::RgbaImage) -> TextureHandle {
+fn color_image(image: image::RgbaImage) -> egui::ColorImage {
     let size = [image.width() as usize, image.height() as usize];
-    ctx.load_texture(
-        name,
-        egui::ColorImage::from_rgba_unmultiplied(size, image.as_raw()),
-        egui::TextureOptions::LINEAR,
-    )
+    egui::ColorImage::from_rgba_unmultiplied(size, image.as_raw())
 }
 impl eframe::App for Folio {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
@@ -1346,6 +1524,7 @@ impl eframe::App for Folio {
                 };
                 if save {
                     self.page_gen.fetch_add(1, Ordering::AcqRel);
+                    self.link_gen.fetch_add(1, Ordering::AcqRel);
                     self.thumb_gen.fetch_add(1, Ordering::AcqRel);
                     self.open_gen.fetch_add(1, Ordering::AcqRel);
                     self.closing = self.send(Task::Shutdown);
@@ -1374,6 +1553,9 @@ impl eframe::App for Folio {
         });
         if self.reader.is_some() {
             self.reader_ui(ctx);
+            // The page may have changed during this very UI frame (link click,
+            // keyboard jump or scrolling), so arm the debounce timer afterwards.
+            self.flush_position_if_idle(ctx);
             return;
         }
         if ctx.screen_rect().width() > 760.0 {
@@ -1427,11 +1609,16 @@ mod tests {
         let (_page_tx, page_rx) = mpsc::sync_channel(1);
         let (thumb_tx, _thumb_jobs) = mpsc::sync_channel(12);
         let (_thumb_results, thumb_rx) = mpsc::sync_channel(4);
+        let (link_tx, _link_jobs) = mpsc::sync_channel::<LinkJob>(12);
+        let (_link_results, link_rx) = mpsc::sync_channel::<LinkResult>(8);
         let root = PathBuf::from("/library");
         let mut app = Folio {
             tx,
             rx,
             page_rx,
+            link_tx,
+            link_rx,
+            link_gen: Arc::new(AtomicU64::new(0)),
             thumb_tx,
             thumb_rx,
             pages: Arc::new((Mutex::new(None), Condvar::new())),
@@ -1495,6 +1682,11 @@ mod tests {
             loading: false,
             zoom: 1.0,
             cache: VecDeque::new(),
+            links: HashMap::new(),
+            link_pending: HashSet::new(),
+            target_edge: 1024,
+            last_visible_page: None,
+            position_changed_at: None,
             pending_page: None,
             queued_pages: VecDeque::new(),
             failed: HashSet::new(),
@@ -1506,6 +1698,8 @@ mod tests {
         assert_eq!(app.reader.as_ref().unwrap().page, 3);
         app.turn(0);
         assert_eq!(app.reader.as_ref().unwrap().page, 1);
+        assert!(app.reader.as_ref().unwrap().position_changed_at.is_some());
+        assert!(_tasks.try_recv().is_err(), "Normal navigation must not write a position per page");
 
         app.state.continuous_scroll = true;
         let reader = app.reader.as_mut().unwrap();
@@ -1533,7 +1727,10 @@ mod tests {
             app.reader.as_ref().unwrap().queued_pages.contains(&3),
             "Pages ahead of the visible range should be prefetched"
         );
+        let previous_generation = app.page_gen.load(Ordering::Acquire);
         app.queue_continuous_pages(&[5_000]);
+        assert!(app.page_gen.load(Ordering::Acquire) > previous_generation,
+            "A distant jump should cancel a render far outside the viewport");
         assert!(
             app.reader.as_ref().unwrap().queued_pages.contains(&4_998),
             "Pages behind the visible range should be prefetched"
@@ -1542,5 +1739,14 @@ mod tests {
             app.reader.as_ref().unwrap().queued_pages.contains(&5_002),
             "Pages ahead of the visible range should be prefetched"
         );
+    }
+
+    #[test]
+    fn adaptive_resolution_is_bucketed_and_bounded() {
+        let compact = Folio::page_edge(Vec2::new(360.0, 500.0), 1.0, 1.0, true);
+        let wide = Folio::page_edge(Vec2::new(1100.0, 700.0), 1.0, 1.0, true);
+        assert!(compact < wide);
+        assert!(wide <= render::PAGE_EDGE);
+        assert_eq!(Folio::page_edge(Vec2::new(3000.0, 2000.0), 3.0, 2.0, true), render::PAGE_EDGE);
     }
 }

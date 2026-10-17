@@ -14,7 +14,15 @@ use std::{
 
 pub const PAGE_EDGE: u32 = 2400;
 pub const THUMB_EDGE: u32 = 192;
-pub const DISK_BUDGET: u64 = 128 * 1024 * 1024;
+// Includes reading-page PNGs and thumbnails; eviction occurs off the UI/render workers.
+pub const DISK_BUDGET: u64 = 384 * 1024 * 1024;
+
+/// Use coarse resolution steps to avoid rerendering for each tiny resize/zoom change.
+pub fn edge_bucket(desired_pixels: f32) -> u32 {
+    const BUCKETS: [u32; 8] = [512, 704, 896, 1152, 1408, 1728, 2048, PAGE_EDGE];
+    let pixels = if desired_pixels.is_finite() { desired_pixels.max(1.0) } else { 1152.0 };
+    BUCKETS.into_iter().find(|&edge| edge as f32 >= pixels).unwrap_or(PAGE_EDGE)
+}
 
 /// A clickable internal destination within one rendered PDF page.
 /// Bounds are normalized to the page's displayed image (top-left origin).
@@ -254,13 +262,14 @@ pub fn raster(
         return Err("Invalid render dimensions or page.".into());
     }
     let thumb = edge == THUMB_EDGE && page == 1;
-    let cached = key(path).ok().map(|key| cache.join(format!("{key}.png")));
-    if thumb {
-        if let Some(p) = &cached {
-            if let Ok(image) = decode(p) {
-                return Ok(image);
-            }
-        }
+    // Cached reading pages are keyed by file fingerprint, page AND resolution.
+    // The original thumbnail cache filename is preserved for backward compatibility.
+    let cached = key(path).ok().map(|key| {
+        if thumb { cache.join(format!("{key}.png")) }
+        else { cache.join(format!("{key}-p{page}-e{edge}.png")) }
+    });
+    if let Some(p) = &cached {
+        if let Ok(image) = decode(p) { return Ok(image); }
     }
     // Cache failure must never prevent viewing a document.
     let temp = tempfile::tempdir().map_err(|e| e.to_string())?;
@@ -282,12 +291,22 @@ pub fn raster(
     execute(command, generation, expected)?;
     let output = prefix.with_extension("png");
     let result = decode(&output)?;
-    if thumb {
-        if let Some(p) = cached {
-            if fs::create_dir_all(cache).is_ok() {
-                let _ = fs::copy(&output, p);
-                let _ = trim_cache(cache, DISK_BUDGET);
+    if let Some(p) = cached {
+        if generation.load(Ordering::Acquire) == expected && fs::create_dir_all(cache).is_ok() {
+            // Write a unique temporary file and atomically rename it into the cache.
+            // Interrupted rendering never leaves a partial PNG at its final name.
+            let temp_name = cache.join(format!(
+                "{}.{}.tmp", p.file_name().unwrap_or_default().to_string_lossy(),
+                std::process::id()
+            ));
+            if fs::copy(&output, &temp_name).is_ok() {
+                if fs::rename(&temp_name, &p).is_err() {
+                    // Windows cannot rename over a corrupt existing cache entry.
+                    let _ = fs::remove_file(&p);
+                    let _ = fs::rename(&temp_name, p);
+                }
             }
+            let _ = fs::remove_file(temp_name);
         }
     }
     Ok(result)
@@ -335,6 +354,14 @@ mod link_tests {
         assert_eq!(links[1].target_page, 3);
         assert!(parse_page_links(xml, 2, 3).is_empty());
         assert_eq!(parse_page_links(xml, 1, 2).len(), 1);
+    }
+
+    #[test]
+    fn raster_buckets_limit_repeated_work() {
+        assert_eq!(edge_bucket(850.0), 896);
+        assert_eq!(edge_bucket(851.0), 896);
+        assert_eq!(edge_bucket(4000.0), PAGE_EDGE);
+        assert_eq!(edge_bucket(f32::NAN), 1152);
     }
 
     #[test]
