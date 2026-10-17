@@ -35,6 +35,7 @@ impl View {
 enum Task {
     Load(u64, View, Option<PathBuf>),
     Root(PathBuf),
+    Import(Vec<PathBuf>, PathBuf),
     Favorite(PathBuf, bool),
     Remove(PathBuf),
     Open(PathBuf, bool, u64),
@@ -47,6 +48,8 @@ enum Task {
 enum Event {
     Snapshot(Snapshot),
     Rows(u64, Result<Vec<Entry>, String>),
+    Collections(u64, Vec<Entry>),
+    Imported(usize),
     Open(PathBuf, ReadingPosition, u32, u64),
     Recovery(PathBuf),
     Notice(String),
@@ -123,14 +126,7 @@ struct Reader {
 }
 impl Reader {
     fn reading_position(&self, continuous: bool) -> ReadingPosition {
-        ReadingPosition::new(
-            self.page,
-            if continuous {
-                self.scroll_fraction
-            } else {
-                0.0
-            },
-        )
+        ReadingPosition::new(self.page, if continuous { self.scroll_fraction } else { 0.0 })
     }
 }
 
@@ -152,6 +148,14 @@ pub struct Folio {
     view: View,
     folder: Option<PathBuf>,
     entries: Vec<Entry>,
+    document_count: usize,
+    search_query_cached: String,
+    search_indices: Vec<usize>,
+    search_listing: u64,
+    collections: Vec<Entry>,
+    search: String,
+    list_view: bool,
+    file_dialog: Option<Receiver<Option<Vec<PathBuf>>>>,
     reader: Option<Reader>,
     textures: HashMap<PathBuf, Option<TextureHandle>>,
     lru: VecDeque<PathBuf>,
@@ -198,6 +202,7 @@ fn data_worker(
             match task {
                 Task::Load(id, view, folder) => {
                     let s = store.snapshot()?;
+                    let root = s.root.clone();
                     let rows = match view {
                         View::Library => match (s.root, folder) {
                             (Some(root), Some(folder)) => library::scan(&root, &folder),
@@ -212,8 +217,58 @@ fn data_worker(
                         }
                         View::Settings => Ok(vec![]),
                     };
+                    let folders = root
+                        .as_ref()
+                        .and_then(|root| library::scan(root, root).ok())
+                        .unwrap_or_default()
+                        .into_iter()
+                        .filter(|entry| entry.directory)
+                        .collect();
                     send(Event::Rows(id, rows));
+                    send(Event::Collections(id, folders));
                     return Ok(());
+                }
+                Task::Import(sources, folder) => {
+                    let root = store.snapshot()?.root
+                        .ok_or_else(|| "Choose a library folder in Settings first.".to_owned())?;
+                    let destination = library::within(&root, &folder)?;
+                    let mut imported = 0_usize;
+                    for source in sources {
+                        if !source.is_file() || !source.extension()
+                            .is_some_and(|ext| ext.eq_ignore_ascii_case("pdf")) {
+                            continue;
+                        }
+                        let Some(name) = source.file_name() else { continue; };
+                        let stem = source.file_stem().unwrap_or_default().to_string_lossy();
+                        // create_new prevents replacing any existing document.
+                        for index in 0..10000 {
+                            let filename = if index == 0 {
+                                name.to_os_string()
+                            } else {
+                                format!("{stem} ({index}).pdf").into()
+                            };
+                            let target = destination.join(filename);
+                            match std::fs::OpenOptions::new().write(true).create_new(true).open(&target) {
+                                Ok(mut output) => {
+                                    let result = (|| -> std::io::Result<()> {
+                                        let mut input = std::fs::File::open(&source)?;
+                                        std::io::copy(&mut input, &mut output)?;
+                                        output.sync_all()
+                                    })();
+                                    if let Err(error) = result {
+                                        drop(output);
+                                        let _ = std::fs::remove_file(&target);
+                                        return Err(format!("Could not import {}: {error}", source.display()));
+                                    }
+                                    imported += 1;
+                                    break;
+                                }
+                                Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
+                                Err(error) => return Err(format!("Could not create PDF: {error}")),
+                            }
+                        }
+                    }
+                    send(Event::Imported(imported));
                 }
                 Task::Root(p) => {
                     store.root(&p)?;
@@ -260,10 +315,7 @@ fn data_worker(
                         } else {
                             String::new()
                         };
-                        send(Event::Notice(format!(
-                            "Position saved: page {}{suffix}.",
-                            position.page
-                        )));
+                        send(Event::Notice(format!("Position saved: page {}{suffix}.", position.page)));
                     }
                     return Ok(());
                 }
@@ -360,8 +412,9 @@ impl Folio {
                         }
                         value.take().unwrap()
                     };
-                    let mut result =
-                        render::raster(&job.path, job.page, job.edge, &cache, &gen, job.id);
+                    let mut result = render::raster(
+                        &job.path, job.page, job.edge, &cache, &gen, job.id,
+                    );
                     if let Ok(image) = &mut result {
                         if job.dark {
                             for pixel in image.pixels_mut() {
@@ -374,16 +427,10 @@ impl Folio {
                     // Avoid building a multi-megabyte ColorImage on the egui thread.
                     let result = result.map(color_image);
                     if gen.load(Ordering::Acquire) == job.id {
-                        if page_tx
-                            .send(PageResult {
-                                id: job.id,
-                                page: job.page,
-                                edge: job.edge,
-                                dark: job.dark,
-                                result,
-                            })
-                            .is_err()
-                        {
+                        if page_tx.send(PageResult {
+                            id: job.id, page: job.page, edge: job.edge,
+                            dark: job.dark, result,
+                        }).is_err() {
                             break;
                         }
                         ctx.request_repaint();
@@ -407,17 +454,13 @@ impl Folio {
                     if gen.load(Ordering::Acquire) != job.id {
                         continue;
                     }
-                    let links = render::page_links(&job.path, job.page, job.total, &gen, job.id)
-                        .unwrap_or_default();
+                    let links = render::page_links(
+                        &job.path, job.page, job.total, &gen, job.id,
+                    ).unwrap_or_default();
                     if gen.load(Ordering::Acquire) == job.id {
-                        if link_results
-                            .send(LinkResult {
-                                id: job.id,
-                                page: job.page,
-                                links,
-                            })
-                            .is_err()
-                        {
+                        if link_results.send(LinkResult {
+                            id: job.id, page: job.page, links,
+                        }).is_err() {
                             break;
                         }
                         ctx.request_repaint();
@@ -436,10 +479,9 @@ impl Folio {
                     if gen.load(Ordering::Acquire) != job.id {
                         continue;
                     }
-                    let image =
-                        render::raster(&job.path, 1, render::THUMB_EDGE, &cache, &gen, job.id)
-                            .ok()
-                            .map(color_image);
+                    let image = render::raster(
+                        &job.path, 1, render::THUMB_EDGE, &cache, &gen, job.id,
+                    ).ok().map(color_image);
                     if gen.load(Ordering::Acquire) == job.id {
                         if thumb_results
                             .send(ThumbResult {
@@ -475,6 +517,14 @@ impl Folio {
             view: View::Library,
             folder: None,
             entries: vec![],
+            document_count: 0,
+            search_query_cached: String::new(),
+            search_indices: Vec::new(),
+            search_listing: 0,
+            collections: vec![],
+            search: String::new(),
+            list_view: false,
+            file_dialog: None,
             reader: None,
             textures: HashMap::new(),
             lru: VecDeque::new(),
@@ -511,6 +561,8 @@ impl Folio {
         self.pending.clear();
         self.loading = self.send(Task::Load(self.listing, self.view, self.folder.clone()));
         self.entries.clear();
+        self.document_count = 0;
+        self.search_listing = 0;
     }
     fn open(&mut self, path: PathBuf, recovery: bool) {
         let id = self.open_gen.fetch_add(1, Ordering::AcqRel) + 1;
@@ -531,12 +583,8 @@ impl Folio {
         render::edge_bucket(desired)
     }
     fn set_page_edge(&mut self, edge: u32) {
-        let Some(reader) = &mut self.reader else {
-            return;
-        };
-        if reader.target_edge == edge {
-            return;
-        }
+        let Some(reader) = &mut self.reader else { return };
+        if reader.target_edge == edge { return; }
         reader.target_edge = edge;
         if self.state.continuous_scroll {
             // Keep low-resolution cached pages visible while better versions arrive.
@@ -553,13 +601,9 @@ impl Folio {
         r.pending_page = None;
         r.queued_pages.clear();
         r.failed.remove(&r.page);
-        let best_index = r
-            .cache
-            .iter()
-            .enumerate()
+        let best_index = r.cache.iter().enumerate()
             .filter(|(_, item)| item.page == r.page && item.dark == self.state.dark)
-            .max_by_key(|(_, item)| item.edge)
-            .map(|(i, _)| i);
+            .max_by_key(|(_, item)| item.edge).map(|(i, _)| i);
         if let Some(index) = best_index {
             let item = r.cache.remove(index).unwrap();
             let suitable = item.edge >= r.target_edge;
@@ -576,11 +620,8 @@ impl Folio {
         r.loading = r.texture.is_none();
         r.pending_page = Some(r.page);
         *self.pages.0.lock().unwrap() = Some(PageJob {
-            path: r.path.clone(),
-            page: r.page,
-            edge: r.target_edge,
-            dark: self.state.dark,
-            id,
+            path: r.path.clone(), page: r.page,
+            edge: r.target_edge, dark: self.state.dark, id,
         });
         self.pages.1.notify_one();
     }
@@ -610,13 +651,9 @@ impl Folio {
     }
     fn flush_position_if_idle(&mut self, ctx: &egui::Context) {
         let pending = self.reader.as_ref().and_then(|reader| {
-            reader.position_changed_at.map(|changed| {
-                (
-                    reader.path.clone(),
-                    reader.reading_position(self.state.continuous_scroll),
-                    changed,
-                )
-            })
+            reader.position_changed_at.map(|changed| (
+                reader.path.clone(), reader.reading_position(self.state.continuous_scroll), changed,
+            ))
         });
         if let Some((path, position, changed)) = pending {
             if changed.elapsed() >= POSITION_SAVE_DELAY {
@@ -644,12 +681,8 @@ impl Folio {
         }
     }
     fn queue_continuous_pages(&mut self, visible: &[u32]) {
-        let Some(reader) = &mut self.reader else {
-            return;
-        };
-        let Some(first) = visible.iter().copied().min() else {
-            return;
-        };
+        let Some(reader) = &mut self.reader else { return };
+        let Some(first) = visible.iter().copied().min() else { return };
         let last = visible.iter().copied().max().unwrap();
         // Cancel a render that is now far away after a fast scroll or page jump.
         if reader.pending_page.is_some_and(|pending| {
@@ -659,20 +692,14 @@ impl Folio {
             reader.pending_page = None;
             reader.queued_pages.clear();
         }
-        let forward = reader
-            .last_visible_page
-            .map_or(true, |previous| first >= previous);
+        let forward = reader.last_visible_page.map_or(true, |previous| first >= previous);
         reader.last_visible_page = Some(first);
         let mut desired = visible.to_vec();
         // Prefetch in scroll direction first; never spend the pipeline on distant pages.
         for distance in 1..=3 {
             let ahead = last.saturating_add(distance);
             let behind = first.checked_sub(distance);
-            let pair = if forward {
-                [Some(ahead), behind]
-            } else {
-                [behind, Some(ahead)]
-            };
+            let pair = if forward { [Some(ahead), behind] } else { [behind, Some(ahead)] };
             for page in pair.into_iter().flatten() {
                 if (1..=reader.total).contains(&page) && !desired.contains(&page) {
                     desired.push(page);
@@ -683,14 +710,9 @@ impl Folio {
         for page in desired {
             if reader.pending_page == Some(page)
                 || reader.failed.contains(&page)
-                || reader.cache.iter().any(|item| {
-                    item.page == page
-                        && item.dark == self.state.dark
-                        && item.edge >= reader.target_edge
-                })
-            {
-                continue;
-            }
+                || reader.cache.iter().any(|item| item.page == page
+                    && item.dark == self.state.dark && item.edge >= reader.target_edge)
+            { continue; }
             reader.queued_pages.push_back(page);
         }
         self.dispatch_continuous_page();
@@ -698,32 +720,21 @@ impl Folio {
     fn dispatch_continuous_page(&mut self) {
         let id = self.page_gen.load(Ordering::Acquire);
         if let Some(reader) = &mut self.reader {
-            if reader.pending_page.is_some() {
-                return;
-            }
-            let Some(page) = reader.queued_pages.pop_front() else {
-                return;
-            };
+            if reader.pending_page.is_some() { return; }
+            let Some(page) = reader.queued_pages.pop_front() else { return };
             reader.pending_page = Some(page);
             *self.pages.0.lock().unwrap() = Some(PageJob {
-                path: reader.path.clone(),
-                page,
-                edge: reader.target_edge,
-                dark: self.state.dark,
-                id,
+                path: reader.path.clone(), page,
+                edge: reader.target_edge, dark: self.state.dark, id,
             });
             self.pages.1.notify_one();
         }
     }
     fn queue_links(&mut self, page: u32) {
         let Some(r) = &mut self.reader else { return };
-        if r.links.contains_key(&page) || !r.link_pending.insert(page) {
-            return;
-        }
+        if r.links.contains_key(&page) || !r.link_pending.insert(page) { return; }
         let job = LinkJob {
-            path: r.path.clone(),
-            page,
-            total: r.total,
+            path: r.path.clone(), page, total: r.total,
             id: self.link_gen.load(Ordering::Acquire),
         };
         if self.link_tx.try_send(job).is_err() {
@@ -733,9 +744,7 @@ impl Folio {
     fn back(&mut self) {
         if let Some(r) = &self.reader {
             if !self.send(Task::Position(
-                r.path.clone(),
-                r.reading_position(self.state.continuous_scroll),
-                false,
+                r.path.clone(), r.reading_position(self.state.continuous_scroll), false,
             )) {
                 return;
             }
@@ -773,10 +782,25 @@ impl Folio {
                     if id == self.listing {
                         self.loading = false;
                         match result {
-                            Ok(rows) => self.entries = rows,
+                            Ok(rows) => {
+                                self.document_count = rows.iter().filter(|entry| !entry.directory).count();
+                                self.entries = rows;
+                                self.search_listing = 0;
+                            }
                             Err(e) => self.message = Some((e, true)),
                         }
                     }
+                }
+                Event::Collections(id, folders) => {
+                    if id == self.listing { self.collections = folders; }
+                }
+                Event::Imported(count) => {
+                    self.message = Some((if count == 0 {
+                        "No PDF files were selected for import.".into()
+                    } else {
+                        format!("Added {count} PDF{} to your library.", if count == 1 { "" } else { "s" })
+                    }, false));
+                    if count > 0 { self.load(); }
                 }
                 Event::Open(path, position, total, id) => {
                     if id == self.open_gen.load(Ordering::Acquire) {
@@ -850,54 +874,36 @@ impl Folio {
             if result.id == self.page_gen.load(Ordering::Acquire) {
                 let mut load_links = false;
                 if let Some(r) = &mut self.reader {
-                    if r.pending_page == Some(result.page) {
-                        r.pending_page = None;
-                    }
+                    if r.pending_page == Some(result.page) { r.pending_page = None; }
                     match result.result {
                         Ok(image) => {
-                            let redundant = r.cache.iter().any(|item| {
-                                item.page == result.page
-                                    && item.dark == result.dark
-                                    && item.edge >= result.edge
-                            });
+                            let redundant = r.cache.iter().any(|item|
+                                item.page == result.page && item.dark == result.dark
+                                && item.edge >= result.edge);
                             if !redundant {
-                                let t =
-                                    ctx.load_texture("page", image, egui::TextureOptions::LINEAR);
-                                r.cache.retain(|item| {
-                                    !(item.page == result.page
-                                        && item.dark == result.dark
-                                        && item.edge <= result.edge)
-                                });
+                                let t = ctx.load_texture("page", image, egui::TextureOptions::LINEAR);
+                                r.cache.retain(|item| !(item.page == result.page
+                                    && item.dark == result.dark && item.edge <= result.edge));
                                 r.cache.push_back(CachedPage {
-                                    page: result.page,
-                                    dark: result.dark,
-                                    edge: result.edge,
-                                    texture: t.clone(),
+                                    page: result.page, dark: result.dark,
+                                    edge: result.edge, texture: t.clone(),
                                 });
                                 if result.page == r.page && result.dark == self.state.dark {
                                     r.texture = Some(t);
                                     r.loading = false;
                                 }
                                 // LRU budget; never evict the current viewport's pages.
-                                while r
-                                    .cache
-                                    .iter()
-                                    .map(|item| item.texture.size()[0] * item.texture.size()[1] * 4)
-                                    .sum::<usize>()
-                                    > PAGE_CACHE_BUDGET
-                                {
+                                while r.cache.iter().map(|item|
+                                    item.texture.size()[0] * item.texture.size()[1] * 4
+                                ).sum::<usize>() > PAGE_CACHE_BUDGET {
                                     let current = r.page;
                                     let protected = r.last_visible_page.unwrap_or(current);
                                     let first = protected.saturating_sub(2);
                                     let last = protected.saturating_add(4);
-                                    let evict = r.cache.iter().position(|item| {
-                                        item.page != current && !(first..=last).contains(&item.page)
-                                    });
-                                    if let Some(index) = evict {
-                                        r.cache.remove(index);
-                                    } else {
-                                        break;
-                                    }
+                                    let evict = r.cache.iter().position(|item|
+                                        item.page != current && !(first..=last).contains(&item.page));
+                                    if let Some(index) = evict { r.cache.remove(index); }
+                                    else { break; }
                                 }
                             }
                             load_links = true;
@@ -911,16 +917,12 @@ impl Folio {
                         }
                     }
                 }
-                if load_links {
-                    self.queue_links(result.page);
-                }
+                if load_links { self.queue_links(result.page); }
             }
         }
         // Independent metadata pipeline: no raster blocks on pdftohtml.
         for _ in 0..8 {
-            let Ok(result) = self.link_rx.try_recv() else {
-                break;
-            };
+            let Ok(result) = self.link_rx.try_recv() else { break };
             if result.id == self.link_gen.load(Ordering::Acquire) {
                 if let Some(r) = &mut self.reader {
                     r.link_pending.remove(&result.page);
@@ -935,16 +937,10 @@ impl Folio {
                 if result.id == self.thumb_gen.load(Ordering::Acquire) {
                     self.pending.remove(&result.path);
                     self.touch(&result.path);
-                    self.textures.insert(
-                        result.path,
-                        result
-                            .image
-                            .map(|i| ctx.load_texture("preview", i, egui::TextureOptions::LINEAR)),
-                    );
+                    self.textures.insert(result.path,
+                        result.image.map(|i| ctx.load_texture("preview", i, egui::TextureOptions::LINEAR)));
                     while self.lru.len() > 64 {
-                        if let Some(p) = self.lru.pop_front() {
-                            self.textures.remove(&p);
-                        }
+                        if let Some(p) = self.lru.pop_front() { self.textures.remove(&p); }
                     }
                 }
             }
@@ -959,6 +955,19 @@ impl Folio {
                 }
             }
         }
+        if let Some(rx) = &self.file_dialog {
+            if let Ok(picked) = rx.try_recv() {
+                self.file_dialog = None;
+                if let Some(paths) = picked {
+                    let destination = if self.view == View::Library {
+                        self.folder.clone().or_else(|| self.state.root.clone())
+                    } else { self.state.root.clone() };
+                    if let Some(destination) = destination {
+                        self.send(Task::Import(paths, destination));
+                    }
+                }
+            }
+        }
     }
     fn touch(&mut self, p: &PathBuf) {
         if let Some(i) = self.lru.iter().position(|x| x == p) {
@@ -966,35 +975,243 @@ impl Folio {
         }
         self.lru.push_back(p.clone());
     }
-    fn nav(&mut self, ui: &mut egui::Ui) {
-        for view in [View::Library, View::Reading, View::Favorites] {
-            let count = match view {
-                View::Library => {
-                    if self.view == View::Library {
-                        Some(self.entries.len())
-                    } else {
-                        None
-                    }
-                }
-                View::Reading => Some(self.state.history.len()),
-                View::Favorites => Some(self.state.favorites.len()),
-                _ => None,
-            };
-            let label = count
-                .map(|n| format!("{}  {n}", view.title()))
-                .unwrap_or_else(|| view.title().into());
-            if ui.selectable_label(self.view == view, label).clicked() {
-                self.view = view;
-                self.load();
-            }
-        }
-        if ui
-            .selectable_label(self.view == View::Settings, "Settings")
-            .clicked()
-        {
-            self.view = View::Settings;
+    fn change_view(&mut self, view: View) {
+        if self.view != view {
+            self.view = view;
+            self.search.clear();
+            if view != View::Settings { self.load(); }
         }
     }
+
+    fn browse_folder(&mut self, folder: PathBuf) {
+        self.view = View::Library;
+        self.folder = Some(folder);
+        self.search.clear();
+        self.load();
+    }
+
+    fn pick_pdfs(&mut self, ctx: &egui::Context) {
+        if self.state.root.is_none() {
+            self.change_view(View::Settings);
+            self.message = Some(("Choose your library folder before adding a PDF.".into(), false));
+            return;
+        }
+        if self.file_dialog.is_some() { return; }
+        let (tx, rx) = mpsc::sync_channel(1);
+        self.file_dialog = Some(rx);
+        let ctx = ctx.clone();
+        std::thread::spawn(move || {
+            let paths = std::panic::catch_unwind(|| {
+                rfd::FileDialog::new().add_filter("PDF documents", &["pdf"])
+                    .set_title("Add PDFs to Folio").pick_files()
+            }).unwrap_or(None);
+            let _ = tx.send(paths);
+            ctx.request_repaint();
+        });
+    }
+
+    // Custom drawn navigation items keep icon, label and badge aligned without fonts or assets.
+    fn nav_item(ui: &mut egui::Ui, title: &str, symbol: &str, count: Option<usize>, active: bool,
+        indent: f32) -> bool {
+        let width = ui.available_width().max(60.0);
+        let (rect, response) = ui.allocate_exact_size(Vec2::new(width, 43.0), egui::Sense::click());
+        let painter = ui.painter();
+        if active || response.hovered() {
+            painter.rect_filled(rect.shrink2(Vec2::new(0.0, 2.0)), 9.0,
+                if active { Color32::from_rgb(26, 78, 88) } else { Color32::from_rgb(25, 56, 73) });
+        }
+        if active {
+            let rail = egui::Rect::from_min_size(rect.min + Vec2::new(0.0, 7.0), Vec2::new(3.0, 29.0));
+            painter.rect_filled(rail, 2.0, Color32::from_rgb(45, 216, 196));
+        }
+        let color = if active { Color32::WHITE } else { Color32::from_rgb(214, 229, 237) };
+        painter.text(rect.left_center() + Vec2::new(15.0 + indent, 0.0), egui::Align2::LEFT_CENTER,
+            symbol, egui::FontId::proportional(20.0), color);
+        painter.text(rect.left_center() + Vec2::new(47.0 + indent, 0.0), egui::Align2::LEFT_CENTER,
+            title, egui::FontId::proportional(14.0), color);
+        if let Some(count) = count {
+            let center = rect.right_center() - Vec2::new(21.0, 0.0);
+            let badge = egui::Rect::from_center_size(center, Vec2::new(29.0, 25.0));
+            painter.rect_filled(badge, 7.0, Color32::from_rgb(45, 85, 101));
+            painter.text(center, egui::Align2::CENTER_CENTER, count.to_string(),
+                egui::FontId::proportional(12.0), Color32::WHITE);
+        }
+        response.on_hover_text(title).clicked()
+    }
+
+    fn sidebar(&mut self, ui: &mut egui::Ui) {
+        ui.painter().rect_filled(ui.max_rect(), 0.0, Color32::from_rgb(11, 37, 54));
+        // A restrained teal gradient toward the footer, as in the design reference.
+        let rect = ui.max_rect();
+        for stripe in 0..32 {
+            let start = stripe as f32 / 32.0;
+            let y0 = rect.top() + rect.height() * start;
+            let y1 = rect.top() + rect.height() * (stripe + 1) as f32 / 32.0 + 1.0;
+            let glow = (start * 14.0) as u8;
+            ui.painter().rect_filled(egui::Rect::from_min_max(
+                egui::pos2(rect.left(), y0), egui::pos2(rect.right(), y1)), 0.0,
+                Color32::from_rgb(11, 37 + glow, 54 + glow));
+        }
+        ui.add_space(20.0);
+        ui.horizontal(|ui| {
+            let (mark, _) = ui.allocate_exact_size(Vec2::new(48.0, 50.0), egui::Sense::hover());
+            let p = ui.painter();
+            p.rect_filled(egui::Rect::from_min_size(mark.min + Vec2::new(4.0, 9.0), Vec2::new(18.0, 32.0)),
+                4.0, Color32::from_rgb(49, 218, 194));
+            p.rect_filled(egui::Rect::from_min_size(mark.min + Vec2::new(25.0, 9.0), Vec2::new(18.0, 32.0)),
+                4.0, Color32::from_rgb(33, 174, 172));
+            p.line_segment([mark.min + Vec2::new(24.0, 11.0), mark.min + Vec2::new(24.0, 44.0)],
+                egui::Stroke::new(2.0, Color32::from_rgb(145, 254, 232)));
+            ui.vertical(|ui| {
+                ui.label(RichText::new("Folio.").size(28.0).strong().color(Color32::WHITE));
+                ui.label(RichText::new("THE PERSONAL PDF LIBRARY").size(9.5).color(Color32::from_rgb(169, 197, 208)));
+            });
+        });
+        ui.add_space(26.0);
+        let can_add = self.file_dialog.is_none();
+        let button_width = ui.available_width();
+        let add = egui::Button::new(RichText::new("＋  Add PDF").size(16.0)
+                .strong().color(Color32::WHITE))
+            .fill(Color32::from_rgb(25, 158, 152)).rounding(10.0)
+            .min_size(Vec2::new(button_width, 52.0));
+        if ui.add_enabled(can_add, add).clicked() { self.pick_pdfs(ui.ctx()); }
+        ui.add_space(20.0);
+        let all_count = if self.view == View::Library { Some(self.document_count) } else { None };
+        for (view, icon, count) in [
+            (View::Library, "▣", all_count),
+            (View::Reading, "◷", Some(self.state.history.len())),
+            (View::Favorites, "♡", Some(self.state.favorites.len())),
+        ] {
+            if Self::nav_item(ui, view.title(), icon, count, self.view == view, 0.0) {
+                self.change_view(view);
+            }
+        }
+        ui.add_space((ui.available_height() - 100.0).max(12.0));
+        if Self::nav_item(ui, "Settings", "⚙", None, self.view == View::Settings, 0.0) {
+            self.change_view(View::Settings);
+        }
+        ui.add_space(30.0);
+        ui.label(RichText::new("Your library. Your space.")
+            .italics().size(12.0).color(Color32::from_rgb(155, 190, 199)));
+    }
+
+    fn compact_nav(&mut self, ui: &mut egui::Ui) {
+        ui.horizontal_wrapped(|ui| {
+            ui.label(RichText::new("Folio.").size(20.0).strong().color(Color32::from_rgb(14, 105, 103)));
+            for view in [View::Library, View::Reading, View::Favorites, View::Settings] {
+                if ui.selectable_label(self.view == view, view.title()).clicked() {
+                    self.change_view(view);
+                }
+            }
+            if ui.button("＋ Add PDF").clicked() { self.pick_pdfs(ui.ctx()); }
+        });
+    }
+
+    fn refresh(&mut self) {
+        self.textures.clear();
+        self.lru.clear();
+        self.load();
+    }
+
+    fn toolbar_search(&mut self, ui: &mut egui::Ui, width: f32) {
+        egui::Frame::none()
+            .fill(Color32::WHITE)
+            .rounding(10.0)
+            .stroke(egui::Stroke::new(1.0, Color32::from_rgb(227, 233, 240)))
+            .inner_margin(egui::Margin::symmetric(10.0, 7.0))
+            .show(ui, |ui| {
+                ui.horizontal(|ui| {
+                    ui.label(RichText::new("⌕").size(19.0)
+                        .color(Color32::from_rgb(40, 66, 87)));
+                    ui.add(egui::TextEdit::singleline(&mut self.search)
+                        .id(egui::Id::new("folio-search"))
+                        .hint_text("Search documents...")
+                        .desired_width((width - 107.0).max(75.0))
+                        .frame(false));
+                    if width > 230.0 {
+                        ui.label(RichText::new("Ctrl K").size(10.0)
+                            .color(Color32::from_rgb(132, 147, 166)));
+                    }
+                });
+            });
+    }
+
+    fn view_toggle(&mut self, ui: &mut egui::Ui) {
+        let selected = Color32::from_rgb(20, 159, 151);
+        let unselected = Color32::from_rgb(239, 244, 248);
+        let dark = Color32::from_rgb(21, 48, 66);
+        if ui.add(egui::Button::new(RichText::new("▦").size(18.0)
+                .color(if self.list_view { dark } else { Color32::WHITE }))
+                .fill(if self.list_view { unselected } else { selected })
+                .min_size(Vec2::new(42.0, 38.0)).rounding(8.0))
+            .on_hover_text("Grid view").clicked() { self.list_view = false; }
+        if ui.add(egui::Button::new(RichText::new("☷").size(18.0)
+                .color(if self.list_view { Color32::WHITE } else { dark }))
+                .fill(if self.list_view { selected } else { unselected })
+                .min_size(Vec2::new(42.0, 38.0)).rounding(8.0))
+            .on_hover_text("List view").clicked() { self.list_view = true; }
+    }
+
+    fn toolbar(&mut self, ui: &mut egui::Ui) {
+        let compact = ui.available_width() < 770.0;
+        let count = self.document_count;
+        ui.horizontal(|ui| {
+            ui.label(RichText::new(self.view.title()).size(28.0).strong()
+                .color(Color32::from_rgb(17, 39, 58)));
+            if self.view != View::Settings {
+                egui::Frame::none().fill(Color32::from_rgb(241, 245, 248))
+                    .rounding(7.0).inner_margin(egui::Margin::symmetric(9.0, 6.0))
+                    .show(ui, |ui| {
+                        ui.label(RichText::new(format!("{count} documents")).size(12.0)
+                            .color(Color32::from_rgb(96, 113, 133)));
+                    });
+            }
+            if !compact && self.view != View::Settings {
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    if ui.add(egui::Button::new("⟳  Refresh").min_size(Vec2::new(98.0, 39.0))).clicked() {
+                        self.refresh();
+                    }
+                    self.view_toggle(ui);
+                    let search_width = ui.available_width().min(340.0);
+                    self.toolbar_search(ui, search_width);
+                });
+            }
+        });
+        if compact && self.view != View::Settings {
+            ui.add_space(8.0);
+            ui.horizontal(|ui| {
+                let search_width = (ui.available_width() - 200.0).max(130.0);
+                self.toolbar_search(ui, search_width);
+                self.view_toggle(ui);
+                if ui.button("⟳").on_hover_text("Refresh").clicked() { self.refresh(); }
+            });
+        }
+    }
+
+    fn breadcrumbs(&mut self, ui: &mut egui::Ui) {
+        if self.view != View::Library { return; }
+        let Some(root) = self.state.root.clone() else { return; };
+        let current = self.folder.clone().unwrap_or_else(|| root.clone());
+        let mut crumbs = vec![("⌂  Library root".to_owned(), root.clone())];
+        if let Ok(relative) = current.strip_prefix(&root) {
+            let mut cursor = root.clone();
+            for part in relative.components() {
+                cursor.push(part.as_os_str());
+                crumbs.push((part.as_os_str().to_string_lossy().to_string(), cursor.clone()));
+            }
+        }
+        ui.horizontal_wrapped(|ui| {
+            for (index, (label, target)) in crumbs.into_iter().enumerate() {
+                if index > 0 { ui.label(RichText::new("›").size(19.0).color(Color32::from_rgb(159, 178, 196))); }
+                if ui.add(egui::Button::new(RichText::new(label).size(12.0)
+                        .color(Color32::from_rgb(57, 80, 105)))
+                        .fill(Color32::from_rgb(238, 243, 249)).rounding(7.0)).clicked() {
+                    if self.folder.as_ref() != Some(&target) { self.browse_folder(target); }
+                }
+            }
+        });
+    }
+
     fn settings(&mut self, ui: &mut egui::Ui) {
         if ui.button("← Back to Library").clicked() {
             self.view = View::Library;
@@ -1146,8 +1363,7 @@ impl Folio {
                             let scale = ((rect.width() - 16.0) / size.x)
                                 .min((rect.height() - 12.0) / size.y)
                                 .min(1.0);
-                            let image_rect =
-                                egui::Rect::from_center_size(rect.center(), size * scale);
+                            let image_rect = egui::Rect::from_center_size(rect.center(), size * scale);
                             ui.painter().image(
                                 texture.id(),
                                 image_rect,
@@ -1155,8 +1371,10 @@ impl Folio {
                                 Color32::WHITE,
                             );
                         } else {
-                            let paper =
-                                egui::Rect::from_center_size(rect.center(), Vec2::new(85.0, 112.0));
+                            let paper = egui::Rect::from_center_size(
+                                rect.center(),
+                                Vec2::new(85.0, 112.0),
+                            );
                             ui.painter().rect_filled(paper, 5.0, Color32::WHITE);
                             ui.painter().text(
                                 paper.center(),
@@ -1167,10 +1385,7 @@ impl Folio {
                             );
                         }
 
-                        if response
-                            .on_hover_text(e.path.display().to_string())
-                            .clicked()
-                        {
+                        if response.on_hover_text(e.path.display().to_string()).clicked() {
                             if e.directory {
                                 self.folder = Some(e.path.clone());
                                 self.load();
@@ -1218,23 +1433,14 @@ impl Folio {
                             let favored = self.favorite_set.contains(&e.path);
                             ui.horizontal(|ui| {
                                 ui.spacing_mut().item_spacing.x = 5.0;
-                                let remove_width = if self.view == View::Reading {
-                                    34.0
-                                } else {
-                                    0.0
-                                };
-                                let favorite_width = (content_width
-                                    - remove_width
+                                let remove_width = if self.view == View::Reading { 34.0 } else { 0.0 };
+                                let favorite_width = (content_width - remove_width
                                     - if remove_width > 0.0 { 5.0 } else { 0.0 })
-                                .max(24.0);
+                                    .max(24.0);
                                 if ui
                                     .add_sized(
                                         [favorite_width, 26.0],
-                                        egui::Button::new(if favored {
-                                            "★ Saved"
-                                        } else {
-                                            "☆ Favorite"
-                                        }),
+                                        egui::Button::new(if favored { "★ Saved" } else { "☆ Favorite" }),
                                     )
                                     .clicked()
                                 {
@@ -1243,9 +1449,7 @@ impl Folio {
                                 if self.view == View::Reading
                                     && ui
                                         .add_sized([remove_width, 26.0], egui::Button::new("✕"))
-                                        .on_hover_text(
-                                            "Remove from Currently Reading (PDF stays on disk)",
-                                        )
+                                        .on_hover_text("Remove from Currently Reading (PDF stays on disk)")
                                         .clicked()
                                 {
                                     self.send(Task::Remove(e.path.clone()));
@@ -1257,43 +1461,68 @@ impl Folio {
         );
     }
 
-    fn browser(&mut self, ui: &mut egui::Ui) {
-        ui.horizontal_wrapped(|ui| {
-            ui.heading(self.view.title());
-            if ui.button("Refresh").clicked() {
-                self.textures.clear();
-                self.lru.clear();
-                self.load();
-            }
-        });
-        if self.view == View::Library {
-            if self.state.root.is_none() {
-                ui.add_space(50.0);
-                ui.heading("A quiet place for your PDFs.");
-                ui.label("No library folder is configured. Open Settings to choose one.");
-                if ui.button("Open Settings").clicked() {
-                    self.view = View::Settings;
-                }
-                return;
-            }
-            ui.horizontal_wrapped(|ui| {
-                if self.folder != self.state.root {
-                    if ui.button("← Parent").clicked() {
-                        if let Some(parent) = self.folder.as_ref().and_then(|p| p.parent()) {
-                            self.folder = Some(parent.to_path_buf());
-                            self.load();
-                        }
-                    }
-                    if ui.button("Library root").clicked() {
-                        self.folder = self.state.root.clone();
-                        self.load();
-                    }
-                }
-                if let Some(folder) = &self.folder {
-                    ui.label(folder.display().to_string());
-                }
-            });
+    fn document_row(&mut self, ui: &mut egui::Ui, e: &Entry) {
+        if !e.directory && e.available && !self.textures.contains_key(&e.path)
+            && !self.pending.contains(&e.path) && self.thumb_tx.try_send(ThumbJob {
+                path: e.path.clone(), id: self.thumb_gen.load(Ordering::Acquire),
+            }).is_ok() {
+            self.pending.insert(e.path.clone());
         }
+        egui::Frame::none().fill(Color32::WHITE).rounding(10.0).inner_margin(8.0)
+            .show(ui, |ui| {
+                ui.set_min_height(63.0);
+                ui.horizontal(|ui| {
+                    let (rect, response) = ui.allocate_exact_size(Vec2::new(50.0, 62.0), egui::Sense::click());
+                    ui.painter().rect_filled(rect, 5.0, Color32::from_rgb(240, 245, 246));
+                    if let Some(Some(texture)) = self.textures.get(&e.path) {
+                        let size = texture.size_vec2();
+                        let scale = (rect.width()/size.x).min(rect.height()/size.y).min(1.0);
+                        ui.painter().image(texture.id(), egui::Rect::from_center_size(rect.center(), size*scale),
+                            egui::Rect::from_min_max(egui::Pos2::ZERO, egui::pos2(1.0, 1.0)), Color32::WHITE);
+                    } else {
+                        ui.painter().text(rect.center(), egui::Align2::CENTER_CENTER,
+                            if e.directory { "▱" } else { "PDF" }, egui::FontId::proportional(15.0),
+                            Color32::from_rgb(25, 142, 134));
+                    }
+                    if response.clicked() && e.available {
+                        if e.directory { self.browse_folder(e.path.clone()); }
+                        else { self.open(e.path.clone(), false); }
+                    }
+                    ui.vertical(|ui| {
+                        let name = ui.add(egui::Button::new(RichText::new(&e.name).strong())
+                            .frame(false).truncate());
+                        if name.on_hover_text(e.path.display().to_string()).clicked() && e.available {
+                            if e.directory { self.browse_folder(e.path.clone()); }
+                            else { self.open(e.path.clone(), false); }
+                        }
+                        ui.label(RichText::new(if e.directory { "FOLDER" } else { "PDF DOCUMENT" })
+                            .size(11.0).color(Color32::from_rgb(114, 131, 148)));
+                    });
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        if !e.directory {
+                            if self.view == View::Reading && ui.small_button("✕")
+                                .on_hover_text("Remove from Currently Reading").clicked() {
+                                self.send(Task::Remove(e.path.clone()));
+                            }
+                            let favorite = self.favorite_set.contains(&e.path);
+                            if ui.small_button(if favorite { "★ Saved" } else { "☆ Favorite" }).clicked() {
+                                self.send(Task::Favorite(e.path.clone(), !favorite));
+                            }
+                        }
+                    });
+                });
+            });
+    }
+
+    fn browser(&mut self, ui: &mut egui::Ui) {
+        if self.view == View::Library && self.state.root.is_none() {
+            ui.add_space(50.0);
+            ui.heading("A quiet place for your PDFs.");
+            ui.label("No library folder is configured. Open Settings to choose one.");
+            if ui.button("Open Settings").clicked() { self.change_view(View::Settings); }
+            return;
+        }
+        self.breadcrumbs(ui);
         ui.add_space(16.0);
         if self.loading || self.opening {
             ui.horizontal(|ui| {
@@ -1309,11 +1538,40 @@ impl Folio {
         if self.entries.is_empty() {
             ui.label(match self.view {
                 View::Library => "No PDFs or subfolders were found.",
-                View::Favorites => {
-                    "No favorites yet. Select Favorite beside a PDF to keep it here."
-                }
+                View::Favorites => "No favorites yet. Select Favorite beside a PDF to keep it here.",
                 _ => "PDFs you open appear in Currently Reading.",
             });
+            return;
+        }
+        // Only scan filenames when search text or the loaded folder changes.
+        // The scroll loop itself stays virtualized and avoids allocations per frame.
+        let query = self.search.trim().to_lowercase();
+        if self.search_listing != self.listing || self.search_query_cached != query {
+            self.search_indices = if query.is_empty() {
+                Vec::new()
+            } else {
+                self.entries.iter().enumerate()
+                    .filter(|(_, entry)| entry.name.to_lowercase().contains(&query))
+                    .map(|(index, _)| index).collect()
+            };
+            self.search_query_cached = query.clone();
+            self.search_listing = self.listing;
+        }
+        let total = if query.is_empty() { self.entries.len() } else { self.search_indices.len() };
+        if total == 0 {
+            ui.label("No matching documents in this folder. Try a different search.");
+            return;
+        }
+        if self.list_view {
+            egui::ScrollArea::vertical().id_salt(("library-list", self.listing))
+                .auto_shrink([false, false]).show_rows(ui, 92.0, total, |ui, range| {
+                    for index in range {
+                        let actual = if query.is_empty() { index } else { self.search_indices[index] };
+                        if let Some(entry) = self.entries.get(actual).cloned() {
+                            ui.push_id(&entry.path, |ui| self.document_row(ui, &entry));
+                        }
+                    }
+                });
             return;
         }
 
@@ -1323,7 +1581,7 @@ impl Folio {
         let available = (ui.available_width() - 18.0).max(1.0);
         let columns = Self::grid_columns(available);
         let tile_width = ((available - GAP * (columns - 1) as f32) / columns as f32).max(48.0);
-        let rows = self.entries.len().div_ceil(columns);
+        let rows = total.div_ceil(columns);
 
         egui::ScrollArea::vertical()
             .id_salt(("library-grid", self.listing))
@@ -1334,7 +1592,10 @@ impl Folio {
                         ui.spacing_mut().item_spacing.x = GAP;
                         for col in 0..columns {
                             let index = row_index * columns + col;
-                            if let Some(entry) = self.entries.get(index).cloned() {
+                            let actual = if query.is_empty() { index } else {
+                                *self.search_indices.get(index).unwrap_or(&usize::MAX)
+                            };
+                            if let Some(entry) = self.entries.get(actual).cloned() {
                                 ui.push_id(&entry.path, |ui| {
                                     self.document_tile(ui, &entry, tile_width);
                                 });
@@ -1363,12 +1624,8 @@ impl Folio {
             }
             let (page, total, path, position) = {
                 let r = self.reader.as_ref().unwrap();
-                (
-                    r.page,
-                    r.total,
-                    r.path.clone(),
-                    r.reading_position(self.state.continuous_scroll),
-                )
+                (r.page, r.total, r.path.clone(),
+                    r.reading_position(self.state.continuous_scroll))
             };
             ui.horizontal_wrapped(|ui| {
                 if ui
@@ -1394,9 +1651,7 @@ impl Folio {
                 }
                 if ui.button("Save Position").clicked() {
                     if self.send(Task::Position(path, position, true)) {
-                        if let Some(r) = &mut self.reader {
-                            r.position_changed_at = None;
-                        }
+                        if let Some(r) = &mut self.reader { r.position_changed_at = None; }
                     }
                 }
                 let mut dark = self.state.dark;
@@ -1512,8 +1767,8 @@ impl Folio {
             .zip(previous_offset)
             .filter(|(previous, _)| (*previous - row_stride).abs() > f32::EPSILON)
             .map(|(previous, offset)| offset * row_stride / previous);
-        let initial_anchor = scroll_to
-            .map(|anchor| ReadingPosition::new(anchor.page.clamp(1, total), anchor.fraction));
+        let initial_anchor = scroll_to.map(|anchor|
+            ReadingPosition::new(anchor.page.clamp(1, total), anchor.fraction));
         let mut visible_pages = Vec::new();
         let mut retry_page = None;
         let mut internal_jump = None;
@@ -1522,9 +1777,7 @@ impl Folio {
             for index in range {
                 let page = index as u32 + 1;
                 let reader = self.reader.as_ref().unwrap();
-                let texture = reader
-                    .cache
-                    .iter()
+                let texture = reader.cache.iter()
                     .filter(|item| item.page == page && item.dark == self.state.dark)
                     .max_by_key(|item| item.edge)
                     .map(|item| item.texture.clone());
@@ -1541,11 +1794,9 @@ impl Folio {
                             let scale = (available * zoom / image_size.x)
                                 .min(available_height / image_size.y);
                             let image_size = image_size * scale;
-                            let image =
-                                ui.add(egui::Image::new(&texture).fit_to_exact_size(image_size));
+                            let image = ui.add(egui::Image::new(&texture).fit_to_exact_size(image_size));
                             if let Some(links) = reader.links.get(&page) {
-                                if let Some(target) = clicked_pdf_link(ui, image.rect, page, links)
-                                {
+                                if let Some(target) = clicked_pdf_link(ui, image.rect, page, links) {
                                     internal_jump = Some(target);
                                 }
                             }
@@ -1571,10 +1822,7 @@ impl Folio {
                 .show_rows(ui, row_height, total as usize, &mut draw_pages)
         } else if let Some(offset) = resized_offset {
             scroll_area.vertical_scroll_offset(offset).show_rows(
-                ui,
-                row_height,
-                total as usize,
-                &mut draw_pages,
+                ui, row_height, total as usize, &mut draw_pages,
             )
         } else {
             scroll_area.show_rows(ui, row_height, total as usize, &mut draw_pages)
@@ -1590,10 +1838,8 @@ impl Folio {
         // Touch visible textures to keep actually-used pages at the back of the LRU.
         if let Some(reader) = &mut self.reader {
             for &page in &visible_pages {
-                if let Some(index) = reader
-                    .cache
-                    .iter()
-                    .position(|item| item.page == page && item.dark == self.state.dark)
+                if let Some(index) = reader.cache.iter().position(|item|
+                    item.page == page && item.dark == self.state.dark)
                 {
                     let item = reader.cache.remove(index).unwrap();
                     reader.cache.push_back(item);
@@ -1603,14 +1849,7 @@ impl Folio {
         // A full link-worker queue must not permanently lose link metadata.
         // Retry it opportunistically for already-rendered visible pages.
         for &page in &visible_pages {
-            if self
-                .reader
-                .as_ref()
-                .unwrap()
-                .cache
-                .iter()
-                .any(|item| item.page == page)
-            {
+            if self.reader.as_ref().unwrap().cache.iter().any(|item| item.page == page) {
                 self.queue_links(page);
             }
         }
@@ -1646,16 +1885,15 @@ fn clicked_pdf_link(
             continue;
         }
         let response = ui
-            .interact(
-                rect,
-                ui.id().with(("pdf-link", page, index)),
-                egui::Sense::click(),
-            )
+            .interact(rect, ui.id().with(("pdf-link", page, index)), egui::Sense::click())
             .on_hover_cursor(egui::CursorIcon::PointingHand)
             .on_hover_text(format!("Go to page {}", link.target_page));
         if response.hovered() {
-            ui.painter()
-                .rect_filled(rect, 2.0, Color32::from_rgba_unmultiplied(34, 129, 111, 34));
+            ui.painter().rect_filled(
+                rect,
+                2.0,
+                Color32::from_rgba_unmultiplied(34, 129, 111, 34),
+            );
         }
         if response.clicked() {
             destination = Some(link.target_page);
@@ -1676,9 +1914,7 @@ impl eframe::App for Folio {
             if !self.closing {
                 let save = if let Some(r) = &self.reader {
                     self.send(Task::Position(
-                        r.path.clone(),
-                        r.reading_position(self.state.continuous_scroll),
-                        false,
+                        r.path.clone(), r.reading_position(self.state.continuous_scroll), false,
                     ))
                 } else {
                     true
@@ -1692,61 +1928,55 @@ impl eframe::App for Folio {
                 }
             }
         }
-        egui::TopBottomPanel::bottom("status").show(ctx, |ui| {
-            ui.horizontal_wrapped(|ui| {
-                if let Some((message, error)) = &self.message {
-                    ui.label(RichText::new(message).color(if *error {
-                        Color32::DARK_RED
-                    } else {
-                        Color32::from_rgb(20, 100, 80)
-                    }));
-                    if ui.small_button("Dismiss").clicked() {
-                        self.message = None;
+        if self.message.is_some() {
+            egui::TopBottomPanel::bottom("status").show(ctx, |ui| {
+                ui.horizontal_wrapped(|ui| {
+                    if let Some((message, error)) = &self.message {
+                        ui.label(RichText::new(message).color(if *error {
+                            Color32::DARK_RED
+                        } else {
+                            Color32::from_rgb(20, 100, 80)
+                        }));
+                        if ui.small_button("Dismiss").clicked() { self.message = None; }
                     }
-                } else {
-                    ui.label(
-                        RichText::new("FOLIO   /   Your reading stays yours.")
-                            .small()
-                            .color(Color32::GRAY),
-                    );
-                }
+                });
             });
-        });
+        }
         if self.reader.is_some() {
             self.reader_ui(ctx);
-            // The page may have changed during this very UI frame (link click,
-            // keyboard jump or scrolling), so arm the debounce timer afterwards.
+            // Preserve the optimized reader and precise continuous-scroll saving.
             self.flush_position_if_idle(ctx);
             return;
         }
-        if ctx.screen_rect().width() > 760.0 {
-            egui::SidePanel::left("sidebar")
-                .exact_width(208.0)
-                .show(ctx, |ui| {
-                    ui.add_space(20.0);
-                    ui.heading(
-                        RichText::new("Folio.")
-                            .size(32.0)
-                            .color(Color32::from_rgb(24, 104, 91)),
-                    );
-                    ui.label("THE PERSONAL PDF LIBRARY");
-                    ui.add_space(38.0);
-                    self.nav(ui);
-                });
-        } else {
-            egui::TopBottomPanel::top("compact_navigation").show(ctx, |ui| {
-                ui.horizontal_wrapped(|ui| self.nav(ui));
-            });
+        if ctx.input(|input| (input.modifiers.command || input.modifiers.ctrl)
+            && input.key_pressed(egui::Key::K)) {
+            ctx.memory_mut(|m| m.request_focus(egui::Id::new("folio-search")));
         }
-        egui::CentralPanel::default().show(ctx, |ui| {
-            ui.add_space(16.0);
-            if self.view == View::Settings {
-                egui::ScrollArea::vertical().show(ui, |ui| self.settings(ui));
-            } else {
-                self.browser(ui);
-            }
-        });
-        if self.dialog.is_some() {
+        if ctx.screen_rect().width() > 820.0 {
+            egui::SidePanel::left("sidebar")
+                .exact_width(254.0)
+                .frame(egui::Frame::none().fill(Color32::from_rgb(11, 37, 54))
+                    .inner_margin(egui::Margin::symmetric(18.0, 8.0)))
+                .show(ctx, |ui| self.sidebar(ui));
+        } else {
+            egui::TopBottomPanel::top("compact_navigation")
+                .show(ctx, |ui| self.compact_nav(ui));
+        }
+        let available = ctx.available_rect().width();
+        let header_height = if available < 770.0 && self.view != View::Settings { 120.0 } else { 76.0 };
+        egui::TopBottomPanel::top("library_toolbar")
+            .exact_height(header_height)
+            .frame(egui::Frame::none().fill(Color32::WHITE).inner_margin(16.0))
+            .show(ctx, |ui| self.toolbar(ui));
+        egui::CentralPanel::default()
+            .frame(egui::Frame::none().fill(Color32::from_rgb(248, 250, 252))
+                .inner_margin(egui::Margin::symmetric(22.0, 20.0)))
+            .show(ctx, |ui| {
+                if self.view == View::Settings {
+                    egui::ScrollArea::vertical().show(ui, |ui| self.settings(ui));
+                } else { self.browser(ui); }
+            });
+        if self.dialog.is_some() || self.file_dialog.is_some() {
             ctx.request_repaint_after(Duration::from_millis(100));
         }
     }
@@ -1793,6 +2023,14 @@ mod tests {
             favorite_set: HashSet::new(),
             view: View::Library,
             folder: Some(root.clone()),
+            document_count: 10_000,
+            search_query_cached: String::new(),
+            search_indices: Vec::new(),
+            search_listing: 0,
+            collections: Vec::new(),
+            search: String::new(),
+            list_view: false,
+            file_dialog: None,
             entries: (0..10_000)
                 .map(|i| Entry {
                     path: root.join(format!("{i}.pdf")),
@@ -1861,10 +2099,7 @@ mod tests {
         app.turn(0);
         assert_eq!(app.reader.as_ref().unwrap().page, 1);
         assert!(app.reader.as_ref().unwrap().position_changed_at.is_some());
-        assert!(
-            _tasks.try_recv().is_err(),
-            "Normal navigation must not write a position per page"
-        );
+        assert!(_tasks.try_recv().is_err(), "Normal navigation must not write a position per page");
 
         app.state.continuous_scroll = true;
         app.reader.as_mut().unwrap().total = 20;
@@ -1877,14 +2112,10 @@ mod tests {
         assert_eq!(restored.page, 6);
         assert!((restored.fraction - saved.fraction).abs() < 0.001);
         app.turn(8);
-        assert_eq!(
-            app.reader.as_ref().unwrap().reading_position(true),
-            ReadingPosition::new(8, 0.0)
-        );
-        assert_eq!(
-            app.reader.as_ref().unwrap().scroll_to,
-            Some(ReadingPosition::new(8, 0.0))
-        );
+        assert_eq!(app.reader.as_ref().unwrap().reading_position(true),
+            ReadingPosition::new(8, 0.0));
+        assert_eq!(app.reader.as_ref().unwrap().scroll_to,
+            Some(ReadingPosition::new(8, 0.0)));
 
         let reader = app.reader.as_mut().unwrap();
         reader.total = 10_000;
@@ -1913,10 +2144,8 @@ mod tests {
         );
         let previous_generation = app.page_gen.load(Ordering::Acquire);
         app.queue_continuous_pages(&[5_000]);
-        assert!(
-            app.page_gen.load(Ordering::Acquire) > previous_generation,
-            "A distant jump should cancel a render far outside the viewport"
-        );
+        assert!(app.page_gen.load(Ordering::Acquire) > previous_generation,
+            "A distant jump should cancel a render far outside the viewport");
         assert!(
             app.reader.as_ref().unwrap().queued_pages.contains(&4_998),
             "Pages behind the visible range should be prefetched"
@@ -1933,9 +2162,6 @@ mod tests {
         let wide = Folio::page_edge(Vec2::new(1100.0, 700.0), 1.0, 1.0, true);
         assert!(compact < wide);
         assert!(wide <= render::PAGE_EDGE);
-        assert_eq!(
-            Folio::page_edge(Vec2::new(3000.0, 2000.0), 3.0, 2.0, true),
-            render::PAGE_EDGE
-        );
+        assert_eq!(Folio::page_edge(Vec2::new(3000.0, 2000.0), 3.0, 2.0, true), render::PAGE_EDGE);
     }
 }
