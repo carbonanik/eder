@@ -55,7 +55,14 @@ The Rust source uses cross-platform APIs. Only Linux compilation and headless te
 - Native OS window decorations and controls; compact navigation below 760 logical pixels.
 - Local SQLite transactions for preferences and reading state; failed writes produce visible errors.
 
-Choose **Settings → Reading Mode** to switch between **Single Page** and **Continuous Scroll**; the selection is saved locally. In continuous mode, visible pages load incrementally and up to two pages before and after the visible range are prefetched to reduce blank-page flicker while scrolling. Reader keyboard controls: Left/Right or Page Up/Page Down, Home/End, Escape to return. Use scrollbars/trackpad to pan a zoomed page. Text selection, search, annotations, printing, and password entry are not implemented. Password-protected PDFs that require a password produce an error. Dark mode inverts document colors, including images.
+## Using Eder
+
+1. On first launch, open **Settings → Choose folder…** and select the folder that contains your PDFs.
+2. Browse the folder's immediate subfolders and PDFs. Open a folder to navigate into it; use the parent and library-root controls to move back. Use **Refresh** to reload the current folder after changing files outside Eder.
+3. Open a PDF to read it. Eder remembers the last page separately for each PDF. Use **Save Position** to explicitly save and confirm the current page.
+4. Mark a PDF as a favorite for quick access. Open **Currently Reading** for recently opened PDFs; removing an entry from that list does not delete or modify the source file.
+
+Choose **Settings → Reading Mode** to switch between **Single Page** and **Continuous Scroll**; the selection is saved locally. In continuous mode, visible pages load incrementally and up to two pages before and after the visible range are prefetched to reduce blank-page flicker while scrolling. Reader keyboard controls: Left/Right or Page Up/Page Down to change pages, Home/End to jump to the first/last page, and Escape to return to the library. Use scrollbars or a trackpad to pan a zoomed page. Dark mode inverts document colors, including images. Text selection, search, annotations, printing, and password entry are not implemented. Password-protected PDFs that require a password produce an error.
 
 ## Performance design
 
