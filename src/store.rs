@@ -271,7 +271,10 @@ mod tests {
             store.reading_position(&pdf).unwrap(),
             ReadingPosition::new(8, 0.625)
         );
-        assert_eq!(store.snapshot().unwrap().favorites, [pdf.clone()]);
+        assert_eq!(
+            store.snapshot().unwrap().favorites,
+            std::slice::from_ref(&pdf)
+        );
         store.save_position(&pdf, 9).unwrap();
         assert_eq!(
             store.reading_position(&pdf).unwrap(),

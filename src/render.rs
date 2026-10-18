@@ -357,12 +357,10 @@ pub fn raster(
                 p.file_name().unwrap_or_default().to_string_lossy(),
                 std::process::id()
             ));
-            if fs::copy(&output, &temp_name).is_ok() {
-                if fs::rename(&temp_name, &p).is_err() {
-                    // Windows cannot rename over a corrupt existing cache entry.
-                    let _ = fs::remove_file(&p);
-                    let _ = fs::rename(&temp_name, p);
-                }
+            if fs::copy(&output, &temp_name).is_ok() && fs::rename(&temp_name, &p).is_err() {
+                // Windows cannot rename over a corrupt existing cache entry.
+                let _ = fs::remove_file(&p);
+                let _ = fs::rename(&temp_name, p);
             }
             let _ = fs::remove_file(temp_name);
         }

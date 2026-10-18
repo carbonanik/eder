@@ -1,9 +1,9 @@
-use eframe::egui::{self, Color32, RichText, TextureHandle, Vec2};
 use eder::{
     library::{self, Entry},
     render,
     store::{ReadingPosition, Snapshot, Store},
 };
+use eframe::egui::{self, Color32, RichText, TextureHandle, Vec2};
 use std::{
     collections::{HashMap, HashSet, VecDeque},
     path::PathBuf,
@@ -112,10 +112,17 @@ fn paint_icon(painter: &egui::Painter, rect: egui::Rect, icon: UiIcon, color: Co
         }
         UiIcon::Heart => {
             let points = [
-                point(0.0, 0.8), point(-0.85, 0.0), point(-0.85, -0.45),
-                point(-0.55, -0.8), point(-0.2, -0.8), point(0.0, -0.5),
-                point(0.2, -0.8), point(0.55, -0.8), point(0.85, -0.45),
-                point(0.85, 0.0), point(0.0, 0.8),
+                point(0.0, 0.8),
+                point(-0.85, 0.0),
+                point(-0.85, -0.45),
+                point(-0.55, -0.8),
+                point(-0.2, -0.8),
+                point(0.0, -0.5),
+                point(0.2, -0.8),
+                point(0.55, -0.8),
+                point(0.85, -0.45),
+                point(0.85, 0.0),
+                point(0.0, 0.8),
             ];
             for segment in points.windows(2) {
                 line(segment[0], segment[1]);
@@ -131,7 +138,11 @@ fn paint_icon(painter: &egui::Painter, rect: egui::Rect, icon: UiIcon, color: Co
             }
         }
         UiIcon::Search => {
-            painter.circle_stroke(center - Vec2::new(half * 0.18, half * 0.18), half * 0.58, stroke);
+            painter.circle_stroke(
+                center - Vec2::new(half * 0.18, half * 0.18),
+                half * 0.58,
+                stroke,
+            );
             line(point(0.25, 0.25), point(0.8, 0.8));
         }
         UiIcon::Grid => {
@@ -188,8 +199,7 @@ fn paint_icon(painter: &egui::Painter, rect: egui::Rect, icon: UiIcon, color: Co
         }
         UiIcon::Star => {
             let points = std::array::from_fn::<_, 11, _>(|step| {
-                let angle = -std::f32::consts::FRAC_PI_2
-                    + step as f32 * std::f32::consts::PI / 5.0;
+                let angle = -std::f32::consts::FRAC_PI_2 + step as f32 * std::f32::consts::PI / 5.0;
                 let radius = if step % 2 == 0 { 0.9 } else { 0.4 };
                 point(angle.cos() * radius, angle.sin() * radius)
             });
@@ -203,8 +213,12 @@ fn paint_icon(painter: &egui::Painter, rect: egui::Rect, icon: UiIcon, color: Co
         }
         UiIcon::Folder => {
             let points = [
-                point(-0.9, -0.55), point(-0.2, -0.55), point(0.0, -0.25),
-                point(0.9, -0.25), point(0.75, 0.65), point(-0.75, 0.65),
+                point(-0.9, -0.55),
+                point(-0.2, -0.55),
+                point(0.0, -0.25),
+                point(0.9, -0.25),
+                point(0.75, 0.65),
+                point(-0.75, 0.65),
                 point(-0.9, -0.55),
             ];
             for segment in points.windows(2) {
@@ -230,9 +244,9 @@ fn icon_label_button(
                 .size(text_size)
                 .color(Color32::TRANSPARENT),
         )
-            .min_size(size)
-            .fill(fill)
-            .rounding(rounding),
+        .min_size(size)
+        .fill(fill)
+        .rounding(rounding),
     );
     let icon_size = 18.0_f32.min(size.y * 0.55);
     let galley = ui.painter().layout_no_wrap(
@@ -330,7 +344,14 @@ struct Reader {
 }
 impl Reader {
     fn reading_position(&self, continuous: bool) -> ReadingPosition {
-        ReadingPosition::new(self.page, if continuous { self.scroll_fraction } else { 0.0 })
+        ReadingPosition::new(
+            self.page,
+            if continuous {
+                self.scroll_fraction
+            } else {
+                0.0
+            },
+        )
     }
 }
 
@@ -433,16 +454,23 @@ fn data_worker(
                     return Ok(());
                 }
                 Task::Import(sources, folder) => {
-                    let root = store.snapshot()?.root
+                    let root = store
+                        .snapshot()?
+                        .root
                         .ok_or_else(|| "Choose a library folder in Settings first.".to_owned())?;
                     let destination = library::within(&root, &folder)?;
                     let mut imported = 0_usize;
                     for source in sources {
-                        if !source.is_file() || !source.extension()
-                            .is_some_and(|ext| ext.eq_ignore_ascii_case("pdf")) {
+                        if !source.is_file()
+                            || !source
+                                .extension()
+                                .is_some_and(|ext| ext.eq_ignore_ascii_case("pdf"))
+                        {
                             continue;
                         }
-                        let Some(name) = source.file_name() else { continue; };
+                        let Some(name) = source.file_name() else {
+                            continue;
+                        };
                         let stem = source.file_stem().unwrap_or_default().to_string_lossy();
                         // create_new prevents replacing any existing document.
                         for index in 0..10000 {
@@ -452,7 +480,11 @@ fn data_worker(
                                 format!("{stem} ({index}).pdf").into()
                             };
                             let target = destination.join(filename);
-                            match std::fs::OpenOptions::new().write(true).create_new(true).open(&target) {
+                            match std::fs::OpenOptions::new()
+                                .write(true)
+                                .create_new(true)
+                                .open(&target)
+                            {
                                 Ok(mut output) => {
                                     let result = (|| -> std::io::Result<()> {
                                         let mut input = std::fs::File::open(&source)?;
@@ -462,12 +494,17 @@ fn data_worker(
                                     if let Err(error) = result {
                                         drop(output);
                                         let _ = std::fs::remove_file(&target);
-                                        return Err(format!("Could not import {}: {error}", source.display()));
+                                        return Err(format!(
+                                            "Could not import {}: {error}",
+                                            source.display()
+                                        ));
                                     }
                                     imported += 1;
                                     break;
                                 }
-                                Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
+                                Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
+                                    continue
+                                }
                                 Err(error) => return Err(format!("Could not create PDF: {error}")),
                             }
                         }
@@ -519,7 +556,10 @@ fn data_worker(
                         } else {
                             String::new()
                         };
-                        send(Event::Notice(format!("Position saved: page {}{suffix}.", position.page)));
+                        send(Event::Notice(format!(
+                            "Position saved: page {}{suffix}.",
+                            position.page
+                        )));
                     }
                     return Ok(());
                 }
@@ -566,9 +606,9 @@ impl Eder {
         style.visuals.widgets.inactive.weak_bg_fill = SAGE;
         style.visuals.widgets.hovered.bg_fill = Color32::from_rgb(207, 226, 218);
         style.visuals.widgets.active.bg_fill = TEAL;
-        style.visuals.widgets.noninteractive.bg_stroke = egui::Stroke::new(1.0, HAIRLINE);
-        style.visuals.widgets.inactive.bg_stroke = egui::Stroke::new(1.0, HAIRLINE);
-        style.visuals.widgets.hovered.bg_stroke = egui::Stroke::new(1.0, TEAL);
+        style.visuals.widgets.noninteractive.bg_stroke = egui::Stroke::new(1.0_f32, HAIRLINE);
+        style.visuals.widgets.inactive.bg_stroke = egui::Stroke::new(1.0_f32, HAIRLINE);
+        style.visuals.widgets.hovered.bg_stroke = egui::Stroke::new(1.0_f32, TEAL);
         style.visuals.widgets.inactive.rounding = 2.0.into();
         style.visuals.widgets.hovered.rounding = 2.0.into();
         style.visuals.widgets.active.rounding = 2.0.into();
@@ -630,9 +670,8 @@ impl Eder {
                         }
                         value.take().unwrap()
                     };
-                    let mut result = render::raster(
-                        &job.path, job.page, job.edge, &cache, &gen, job.id,
-                    );
+                    let mut result =
+                        render::raster(&job.path, job.page, job.edge, &cache, &gen, job.id);
                     if let Ok(image) = &mut result {
                         if job.dark {
                             for pixel in image.pixels_mut() {
@@ -645,10 +684,16 @@ impl Eder {
                     // Avoid building a multi-megabyte ColorImage on the egui thread.
                     let result = result.map(color_image);
                     if gen.load(Ordering::Acquire) == job.id {
-                        if page_tx.send(PageResult {
-                            id: job.id, page: job.page, edge: job.edge,
-                            dark: job.dark, result,
-                        }).is_err() {
+                        if page_tx
+                            .send(PageResult {
+                                id: job.id,
+                                page: job.page,
+                                edge: job.edge,
+                                dark: job.dark,
+                                result,
+                            })
+                            .is_err()
+                        {
                             break;
                         }
                         ctx.request_repaint();
@@ -672,13 +717,17 @@ impl Eder {
                     if gen.load(Ordering::Acquire) != job.id {
                         continue;
                     }
-                    let links = render::page_links(
-                        &job.path, job.page, job.total, &gen, job.id,
-                    ).unwrap_or_default();
+                    let links = render::page_links(&job.path, job.page, job.total, &gen, job.id)
+                        .unwrap_or_default();
                     if gen.load(Ordering::Acquire) == job.id {
-                        if link_results.send(LinkResult {
-                            id: job.id, page: job.page, links,
-                        }).is_err() {
+                        if link_results
+                            .send(LinkResult {
+                                id: job.id,
+                                page: job.page,
+                                links,
+                            })
+                            .is_err()
+                        {
                             break;
                         }
                         ctx.request_repaint();
@@ -697,9 +746,10 @@ impl Eder {
                     if gen.load(Ordering::Acquire) != job.id {
                         continue;
                     }
-                    let image = render::raster(
-                        &job.path, 1, render::THUMB_EDGE, &cache, &gen, job.id,
-                    ).ok().map(color_image);
+                    let image =
+                        render::raster(&job.path, 1, render::THUMB_EDGE, &cache, &gen, job.id)
+                            .ok()
+                            .map(color_image);
                     if gen.load(Ordering::Acquire) == job.id {
                         if thumb_results
                             .send(ThumbResult {
@@ -801,8 +851,12 @@ impl Eder {
         render::edge_bucket(desired)
     }
     fn set_page_edge(&mut self, edge: u32) {
-        let Some(reader) = &mut self.reader else { return };
-        if reader.target_edge == edge { return; }
+        let Some(reader) = &mut self.reader else {
+            return;
+        };
+        if reader.target_edge == edge {
+            return;
+        }
         reader.target_edge = edge;
         if self.state.continuous_scroll {
             // Keep low-resolution cached pages visible while better versions arrive.
@@ -819,9 +873,13 @@ impl Eder {
         r.pending_page = None;
         r.queued_pages.clear();
         r.failed.remove(&r.page);
-        let best_index = r.cache.iter().enumerate()
+        let best_index = r
+            .cache
+            .iter()
+            .enumerate()
             .filter(|(_, item)| item.page == r.page && item.dark == self.state.dark)
-            .max_by_key(|(_, item)| item.edge).map(|(i, _)| i);
+            .max_by_key(|(_, item)| item.edge)
+            .map(|(i, _)| i);
         if let Some(index) = best_index {
             let item = r.cache.remove(index).unwrap();
             let suitable = item.edge >= r.target_edge;
@@ -838,8 +896,11 @@ impl Eder {
         r.loading = r.texture.is_none();
         r.pending_page = Some(r.page);
         *self.pages.0.lock().unwrap() = Some(PageJob {
-            path: r.path.clone(), page: r.page,
-            edge: r.target_edge, dark: self.state.dark, id,
+            path: r.path.clone(),
+            page: r.page,
+            edge: r.target_edge,
+            dark: self.state.dark,
+            id,
         });
         self.pages.1.notify_one();
     }
@@ -869,9 +930,13 @@ impl Eder {
     }
     fn flush_position_if_idle(&mut self, ctx: &egui::Context) {
         let pending = self.reader.as_ref().and_then(|reader| {
-            reader.position_changed_at.map(|changed| (
-                reader.path.clone(), reader.reading_position(self.state.continuous_scroll), changed,
-            ))
+            reader.position_changed_at.map(|changed| {
+                (
+                    reader.path.clone(),
+                    reader.reading_position(self.state.continuous_scroll),
+                    changed,
+                )
+            })
         });
         if let Some((path, position, changed)) = pending {
             if changed.elapsed() >= POSITION_SAVE_DELAY {
@@ -899,8 +964,12 @@ impl Eder {
         }
     }
     fn queue_continuous_pages(&mut self, visible: &[u32]) {
-        let Some(reader) = &mut self.reader else { return };
-        let Some(first) = visible.iter().copied().min() else { return };
+        let Some(reader) = &mut self.reader else {
+            return;
+        };
+        let Some(first) = visible.iter().copied().min() else {
+            return;
+        };
         let last = visible.iter().copied().max().unwrap();
         // Cancel a render that is now far away after a fast scroll or page jump.
         if reader.pending_page.is_some_and(|pending| {
@@ -910,14 +979,20 @@ impl Eder {
             reader.pending_page = None;
             reader.queued_pages.clear();
         }
-        let forward = reader.last_visible_page.map_or(true, |previous| first >= previous);
+        let forward = reader
+            .last_visible_page
+            .map_or(true, |previous| first >= previous);
         reader.last_visible_page = Some(first);
         let mut desired = visible.to_vec();
         // Prefetch in scroll direction first; never spend the pipeline on distant pages.
         for distance in 1..=3 {
             let ahead = last.saturating_add(distance);
             let behind = first.checked_sub(distance);
-            let pair = if forward { [Some(ahead), behind] } else { [behind, Some(ahead)] };
+            let pair = if forward {
+                [Some(ahead), behind]
+            } else {
+                [behind, Some(ahead)]
+            };
             for page in pair.into_iter().flatten() {
                 if (1..=reader.total).contains(&page) && !desired.contains(&page) {
                     desired.push(page);
@@ -928,9 +1003,14 @@ impl Eder {
         for page in desired {
             if reader.pending_page == Some(page)
                 || reader.failed.contains(&page)
-                || reader.cache.iter().any(|item| item.page == page
-                    && item.dark == self.state.dark && item.edge >= reader.target_edge)
-            { continue; }
+                || reader.cache.iter().any(|item| {
+                    item.page == page
+                        && item.dark == self.state.dark
+                        && item.edge >= reader.target_edge
+                })
+            {
+                continue;
+            }
             reader.queued_pages.push_back(page);
         }
         self.dispatch_continuous_page();
@@ -938,21 +1018,32 @@ impl Eder {
     fn dispatch_continuous_page(&mut self) {
         let id = self.page_gen.load(Ordering::Acquire);
         if let Some(reader) = &mut self.reader {
-            if reader.pending_page.is_some() { return; }
-            let Some(page) = reader.queued_pages.pop_front() else { return };
+            if reader.pending_page.is_some() {
+                return;
+            }
+            let Some(page) = reader.queued_pages.pop_front() else {
+                return;
+            };
             reader.pending_page = Some(page);
             *self.pages.0.lock().unwrap() = Some(PageJob {
-                path: reader.path.clone(), page,
-                edge: reader.target_edge, dark: self.state.dark, id,
+                path: reader.path.clone(),
+                page,
+                edge: reader.target_edge,
+                dark: self.state.dark,
+                id,
             });
             self.pages.1.notify_one();
         }
     }
     fn queue_links(&mut self, page: u32) {
         let Some(r) = &mut self.reader else { return };
-        if r.links.contains_key(&page) || !r.link_pending.insert(page) { return; }
+        if r.links.contains_key(&page) || !r.link_pending.insert(page) {
+            return;
+        }
         let job = LinkJob {
-            path: r.path.clone(), page, total: r.total,
+            path: r.path.clone(),
+            page,
+            total: r.total,
             id: self.link_gen.load(Ordering::Acquire),
         };
         if self.link_tx.try_send(job).is_err() {
@@ -962,7 +1053,9 @@ impl Eder {
     fn back(&mut self) {
         if let Some(r) = &self.reader {
             if !self.send(Task::Position(
-                r.path.clone(), r.reading_position(self.state.continuous_scroll), false,
+                r.path.clone(),
+                r.reading_position(self.state.continuous_scroll),
+                false,
             )) {
                 return;
             }
@@ -1001,7 +1094,8 @@ impl Eder {
                         self.loading = false;
                         match result {
                             Ok(rows) => {
-                                self.document_count = rows.iter().filter(|entry| !entry.directory).count();
+                                self.document_count =
+                                    rows.iter().filter(|entry| !entry.directory).count();
                                 self.entries = rows;
                                 self.search_listing = 0;
                             }
@@ -1010,15 +1104,25 @@ impl Eder {
                     }
                 }
                 Event::Collections(id, folders) => {
-                    if id == self.listing { self.collections = folders; }
+                    if id == self.listing {
+                        self.collections = folders;
+                    }
                 }
                 Event::Imported(count) => {
-                    self.message = Some((if count == 0 {
-                        "No PDF files were selected for import.".into()
-                    } else {
-                        format!("Added {count} PDF{} to your library.", if count == 1 { "" } else { "s" })
-                    }, false));
-                    if count > 0 { self.load(); }
+                    self.message = Some((
+                        if count == 0 {
+                            "No PDF files were selected for import.".into()
+                        } else {
+                            format!(
+                                "Added {count} PDF{} to your library.",
+                                if count == 1 { "" } else { "s" }
+                            )
+                        },
+                        false,
+                    ));
+                    if count > 0 {
+                        self.load();
+                    }
                 }
                 Event::Open(path, position, total, id) => {
                     if id == self.open_gen.load(Ordering::Acquire) {
@@ -1092,36 +1196,54 @@ impl Eder {
             if result.id == self.page_gen.load(Ordering::Acquire) {
                 let mut load_links = false;
                 if let Some(r) = &mut self.reader {
-                    if r.pending_page == Some(result.page) { r.pending_page = None; }
+                    if r.pending_page == Some(result.page) {
+                        r.pending_page = None;
+                    }
                     match result.result {
                         Ok(image) => {
-                            let redundant = r.cache.iter().any(|item|
-                                item.page == result.page && item.dark == result.dark
-                                && item.edge >= result.edge);
+                            let redundant = r.cache.iter().any(|item| {
+                                item.page == result.page
+                                    && item.dark == result.dark
+                                    && item.edge >= result.edge
+                            });
                             if !redundant {
-                                let t = ctx.load_texture("page", image, egui::TextureOptions::LINEAR);
-                                r.cache.retain(|item| !(item.page == result.page
-                                    && item.dark == result.dark && item.edge <= result.edge));
+                                let t =
+                                    ctx.load_texture("page", image, egui::TextureOptions::LINEAR);
+                                r.cache.retain(|item| {
+                                    !(item.page == result.page
+                                        && item.dark == result.dark
+                                        && item.edge <= result.edge)
+                                });
                                 r.cache.push_back(CachedPage {
-                                    page: result.page, dark: result.dark,
-                                    edge: result.edge, texture: t.clone(),
+                                    page: result.page,
+                                    dark: result.dark,
+                                    edge: result.edge,
+                                    texture: t.clone(),
                                 });
                                 if result.page == r.page && result.dark == self.state.dark {
                                     r.texture = Some(t);
                                     r.loading = false;
                                 }
                                 // LRU budget; never evict the current viewport's pages.
-                                while r.cache.iter().map(|item|
-                                    item.texture.size()[0] * item.texture.size()[1] * 4
-                                ).sum::<usize>() > PAGE_CACHE_BUDGET {
+                                while r
+                                    .cache
+                                    .iter()
+                                    .map(|item| item.texture.size()[0] * item.texture.size()[1] * 4)
+                                    .sum::<usize>()
+                                    > PAGE_CACHE_BUDGET
+                                {
                                     let current = r.page;
                                     let protected = r.last_visible_page.unwrap_or(current);
                                     let first = protected.saturating_sub(2);
                                     let last = protected.saturating_add(4);
-                                    let evict = r.cache.iter().position(|item|
-                                        item.page != current && !(first..=last).contains(&item.page));
-                                    if let Some(index) = evict { r.cache.remove(index); }
-                                    else { break; }
+                                    let evict = r.cache.iter().position(|item| {
+                                        item.page != current && !(first..=last).contains(&item.page)
+                                    });
+                                    if let Some(index) = evict {
+                                        r.cache.remove(index);
+                                    } else {
+                                        break;
+                                    }
                                 }
                             }
                             load_links = true;
@@ -1135,12 +1257,16 @@ impl Eder {
                         }
                     }
                 }
-                if load_links { self.queue_links(result.page); }
+                if load_links {
+                    self.queue_links(result.page);
+                }
             }
         }
         // Independent metadata pipeline: no raster blocks on pdftohtml.
         for _ in 0..8 {
-            let Ok(result) = self.link_rx.try_recv() else { break };
+            let Ok(result) = self.link_rx.try_recv() else {
+                break;
+            };
             if result.id == self.link_gen.load(Ordering::Acquire) {
                 if let Some(r) = &mut self.reader {
                     r.link_pending.remove(&result.page);
@@ -1155,10 +1281,16 @@ impl Eder {
                 if result.id == self.thumb_gen.load(Ordering::Acquire) {
                     self.pending.remove(&result.path);
                     self.touch(&result.path);
-                    self.textures.insert(result.path,
-                        result.image.map(|i| ctx.load_texture("preview", i, egui::TextureOptions::LINEAR)));
+                    self.textures.insert(
+                        result.path,
+                        result
+                            .image
+                            .map(|i| ctx.load_texture("preview", i, egui::TextureOptions::LINEAR)),
+                    );
                     while self.lru.len() > 64 {
-                        if let Some(p) = self.lru.pop_front() { self.textures.remove(&p); }
+                        if let Some(p) = self.lru.pop_front() {
+                            self.textures.remove(&p);
+                        }
                     }
                 }
             }
@@ -1179,7 +1311,9 @@ impl Eder {
                 if let Some(paths) = picked {
                     let destination = if self.view == View::Library {
                         self.folder.clone().or_else(|| self.state.root.clone())
-                    } else { self.state.root.clone() };
+                    } else {
+                        self.state.root.clone()
+                    };
                     if let Some(destination) = destination {
                         self.send(Task::Import(paths, destination));
                     }
@@ -1197,7 +1331,9 @@ impl Eder {
         if self.view != view {
             self.view = view;
             self.search.clear();
-            if view != View::Settings { self.load(); }
+            if view != View::Settings {
+                self.load();
+            }
         }
     }
 
@@ -1211,77 +1347,156 @@ impl Eder {
     fn pick_pdfs(&mut self, ctx: &egui::Context) {
         if self.state.root.is_none() {
             self.change_view(View::Settings);
-            self.message = Some(("Choose your library folder before adding a PDF.".into(), false));
+            self.message = Some((
+                "Choose your library folder before adding a PDF.".into(),
+                false,
+            ));
             return;
         }
-        if self.file_dialog.is_some() { return; }
+        if self.file_dialog.is_some() {
+            return;
+        }
         let (tx, rx) = mpsc::sync_channel(1);
         self.file_dialog = Some(rx);
         let ctx = ctx.clone();
         std::thread::spawn(move || {
             let paths = std::panic::catch_unwind(|| {
-                rfd::FileDialog::new().add_filter("PDF documents", &["pdf"])
-                    .set_title("Add PDFs to Eder").pick_files()
-            }).unwrap_or(None);
+                rfd::FileDialog::new()
+                    .add_filter("PDF documents", &["pdf"])
+                    .set_title("Add PDFs to Eder")
+                    .pick_files()
+            })
+            .unwrap_or(None);
             let _ = tx.send(paths);
             ctx.request_repaint();
         });
     }
 
     // Editorial navigation: numeric index, no icons or decorative pills.
-    fn nav_item(ui: &mut egui::Ui, title: &str, _icon: UiIcon, count: Option<usize>, active: bool,
-        _indent: f32) -> bool {
+    fn nav_item(
+        ui: &mut egui::Ui,
+        title: &str,
+        _icon: UiIcon,
+        count: Option<usize>,
+        active: bool,
+        _indent: f32,
+    ) -> bool {
         let width = ui.available_width().max(60.0);
         let (rect, response) = ui.allocate_exact_size(Vec2::new(width, 54.0), egui::Sense::click());
         let painter = ui.painter();
         if active || response.hovered() {
-            painter.rect_filled(rect, 0.0, if active { SAGE } else { Color32::from_rgb(237, 236, 228) });
+            painter.rect_filled(
+                rect,
+                0.0,
+                if active {
+                    SAGE
+                } else {
+                    Color32::from_rgb(237, 236, 228)
+                },
+            );
         }
-        painter.line_segment([rect.left_bottom(), rect.right_bottom()], egui::Stroke::new(1.0, HAIRLINE));
+        painter.line_segment(
+            [rect.left_bottom(), rect.right_bottom()],
+            egui::Stroke::new(1.0_f32, HAIRLINE),
+        );
         let number = match title {
-            "Library" => "01", "Currently Reading" => "02", "Favorites" => "03",
-            "Settings" => "04", _ => "—",
+            "Library" => "01",
+            "Currently Reading" => "02",
+            "Favorites" => "03",
+            "Settings" => "04",
+            _ => "—",
         };
-        painter.text(rect.left_center() + Vec2::new(10.0, 0.0), egui::Align2::LEFT_CENTER,
-            number, egui::FontId::proportional(10.0), if active { TEAL } else { MUTED });
-        painter.text(rect.left_center() + Vec2::new(43.0, 0.0), egui::Align2::LEFT_CENTER,
-            title, egui::FontId::proportional(14.0), INK);
+        painter.text(
+            rect.left_center() + Vec2::new(10.0, 0.0),
+            egui::Align2::LEFT_CENTER,
+            number,
+            egui::FontId::proportional(10.0),
+            if active { TEAL } else { MUTED },
+        );
+        painter.text(
+            rect.left_center() + Vec2::new(43.0, 0.0),
+            egui::Align2::LEFT_CENTER,
+            title,
+            egui::FontId::proportional(14.0),
+            INK,
+        );
         if let Some(count) = count {
-            painter.text(rect.right_center() - Vec2::new(12.0, 0.0), egui::Align2::RIGHT_CENTER,
-                format!("{:02}", count), egui::FontId::proportional(11.0), MUTED);
+            painter.text(
+                rect.right_center() - Vec2::new(12.0, 0.0),
+                egui::Align2::RIGHT_CENTER,
+                format!("{:02}", count),
+                egui::FontId::proportional(11.0),
+                MUTED,
+            );
         }
         response.on_hover_text(title).clicked()
     }
 
     fn sidebar(&mut self, ui: &mut egui::Ui) {
         ui.add_space(25.0);
-        ui.label(RichText::new("EDER / READER").size(10.0).strong().color(TEAL));
+        ui.label(
+            RichText::new("EDER / READER")
+                .size(10.0)
+                .strong()
+                .color(TEAL),
+        );
         ui.add_space(12.0);
         ui.label(RichText::new("Eder.").size(43.0).strong().color(INK));
-        ui.label(RichText::new("A quieter way to read.").size(12.0).color(MUTED));
+        ui.label(
+            RichText::new("A quieter way to read.")
+                .size(12.0)
+                .color(MUTED),
+        );
         ui.add_space(41.0);
         // ui.label(RichText::new("YOUR WORKSPACE").size(10.0).strong().color(MUTED));
         // ui.add_space(12.0);
         let can_add = self.file_dialog.is_none();
         let button_width = ui.available_width();
-        let add = ui.add_enabled_ui(can_add, |ui| {
-            icon_label_button(ui, UiIcon::Plus, "Add document",
-                Vec2::new(button_width, 44.0), DEEP, LIGHT, 13.0, 2.0)
-        }).inner;
-        if add.clicked() { self.pick_pdfs(ui.ctx()); }
+        let add = ui
+            .add_enabled_ui(can_add, |ui| {
+                icon_label_button(
+                    ui,
+                    UiIcon::Plus,
+                    "Add document",
+                    Vec2::new(button_width, 44.0),
+                    DEEP,
+                    LIGHT,
+                    13.0,
+                    2.0,
+                )
+            })
+            .inner;
+        if add.clicked() {
+            self.pick_pdfs(ui.ctx());
+        }
         ui.add_space(26.0);
-        let all_count = if self.view == View::Library { Some(self.document_count) } else { None };
+        let all_count = if self.view == View::Library {
+            Some(self.document_count)
+        } else {
+            None
+        };
         for (view, icon, count) in [
             (View::Library, UiIcon::Library, all_count),
             (View::Reading, UiIcon::Clock, Some(self.state.history.len())),
-            (View::Favorites, UiIcon::Heart, Some(self.state.favorites.len())),
+            (
+                View::Favorites,
+                UiIcon::Heart,
+                Some(self.state.favorites.len()),
+            ),
         ] {
             if Self::nav_item(ui, view.title(), icon, count, self.view == view, 0.0) {
                 self.change_view(view);
             }
         }
         ui.add_space((ui.available_height() - 60.0).max(18.0));
-        if Self::nav_item(ui, "Settings", UiIcon::Settings, None, self.view == View::Settings, 0.0) {
+        if Self::nav_item(
+            ui,
+            "Settings",
+            UiIcon::Settings,
+            None,
+            self.view == View::Settings,
+            0.0,
+        ) {
             self.change_view(View::Settings);
         }
         ui.add_space(22.0);
@@ -1290,8 +1505,16 @@ impl Eder {
     fn compact_nav(&mut self, ui: &mut egui::Ui) {
         ui.horizontal_wrapped(|ui| {
             ui.label(RichText::new("Eder.").size(24.0).strong().color(INK));
-            for view in [View::Library, View::Reading, View::Favorites, View::Settings] {
-                if ui.selectable_label(self.view == view, view.title()).clicked() {
+            for view in [
+                View::Library,
+                View::Reading,
+                View::Favorites,
+                View::Settings,
+            ] {
+                if ui
+                    .selectable_label(self.view == view, view.title())
+                    .clicked()
+                {
                     self.change_view(view);
                 }
             }
@@ -1304,7 +1527,11 @@ impl Eder {
                 ui.visuals().text_color(),
                 14.0,
                 4.0,
-            ).clicked() { self.pick_pdfs(ui.ctx()); }
+            )
+            .clicked()
+            {
+                self.pick_pdfs(ui.ctx());
+            }
         });
     }
 
@@ -1322,22 +1549,27 @@ impl Eder {
             .inner_margin(egui::Margin::symmetric(10.0, 7.0))
             .show(ui, |ui| {
                 ui.horizontal(|ui| {
-                let (icon_rect, _) =
-                    ui.allocate_exact_size(Vec2::splat(19.0), egui::Sense::hover());
-                paint_icon(
-                    ui.painter(),
-                    icon_rect,
-                    UiIcon::Search,
-                    Color32::from_rgb(40, 66, 87),
-                );
-                    ui.add(egui::TextEdit::singleline(&mut self.search)
-                        .id(egui::Id::new("eder-search"))
-                        .hint_text("Search documents...")
-                        .desired_width((width - 107.0).max(75.0))
-                        .frame(false));
+                    let (icon_rect, _) =
+                        ui.allocate_exact_size(Vec2::splat(19.0), egui::Sense::hover());
+                    paint_icon(
+                        ui.painter(),
+                        icon_rect,
+                        UiIcon::Search,
+                        Color32::from_rgb(40, 66, 87),
+                    );
+                    ui.add(
+                        egui::TextEdit::singleline(&mut self.search)
+                            .id(egui::Id::new("eder-search"))
+                            .hint_text("Search documents...")
+                            .desired_width((width - 107.0).max(75.0))
+                            .frame(false),
+                    );
                     if width > 230.0 {
-                        ui.label(RichText::new("Ctrl K").size(10.0)
-                            .color(Color32::from_rgb(132, 147, 166)));
+                        ui.label(
+                            RichText::new("Ctrl K")
+                                .size(10.0)
+                                .color(Color32::from_rgb(132, 147, 166)),
+                        );
                     }
                 });
             });
@@ -1357,7 +1589,11 @@ impl Eder {
             18.0,
             8.0,
         )
-            .on_hover_text("Grid view").clicked() { self.list_view = false; }
+        .on_hover_text("Grid view")
+        .clicked()
+        {
+            self.list_view = false;
+        }
         if icon_label_button(
             ui,
             UiIcon::List,
@@ -1368,54 +1604,100 @@ impl Eder {
             18.0,
             8.0,
         )
-            .on_hover_text("List view").clicked() { self.list_view = true; }
+        .on_hover_text("List view")
+        .clicked()
+        {
+            self.list_view = true;
+        }
     }
 
     fn toolbar(&mut self, ui: &mut egui::Ui) {
         let compact = ui.available_width() < 770.0;
-        ui.label(RichText::new("WORKSPACE / DOCUMENTS").size(10.0).strong().color(TEAL));
+        ui.label(
+            RichText::new("WORKSPACE / DOCUMENTS")
+                .size(10.0)
+                .strong()
+                .color(TEAL),
+        );
         ui.add_space(3.0);
         ui.horizontal(|ui| {
-            ui.label(RichText::new(self.view.title()).size(if compact { 31.0 } else { 40.0 })
-                .strong().color(INK));
+            ui.label(
+                RichText::new(self.view.title())
+                    .size(if compact { 31.0 } else { 40.0 })
+                    .strong()
+                    .color(INK),
+            );
             if self.view != View::Settings {
                 ui.add_space(10.0);
-                ui.label(RichText::new(format!("{:02} ITEMS", self.document_count))
-                    .size(11.0).color(MUTED));
+                ui.label(
+                    RichText::new(format!("{:02} ITEMS", self.document_count))
+                        .size(11.0)
+                        .color(MUTED),
+                );
             }
         });
         if self.view != View::Settings {
             ui.add_space(10.0);
             ui.horizontal(|ui| {
                 let controls_width = if compact { 140.0 } else { 210.0 };
-                let search_width = (ui.available_width() - controls_width).min(400.0).max(120.0);
+                let search_width = (ui.available_width() - controls_width)
+                    .min(400.0)
+                    .max(120.0);
                 self.toolbar_search(ui, search_width);
-                if ui.available_width() > 90.0 { self.view_toggle(ui); }
-                if ui.available_width() > 38.0 && icon_label_button(
-                    ui, UiIcon::Refresh, "", Vec2::new(36.0, 36.0),
-                    SAGE, INK, 12.0, 2.0,
-                ).on_hover_text("Refresh documents").clicked() { self.refresh(); }
+                if ui.available_width() > 90.0 {
+                    self.view_toggle(ui);
+                }
+                if ui.available_width() > 38.0
+                    && icon_label_button(
+                        ui,
+                        UiIcon::Refresh,
+                        "",
+                        Vec2::new(36.0, 36.0),
+                        SAGE,
+                        INK,
+                        12.0,
+                        2.0,
+                    )
+                    .on_hover_text("Refresh documents")
+                    .clicked()
+                {
+                    self.refresh();
+                }
             });
         }
     }
 
     fn breadcrumbs(&mut self, ui: &mut egui::Ui) {
-        if self.view != View::Library { return; }
-        let Some(root) = self.state.root.clone() else { return; };
+        if self.view != View::Library {
+            return;
+        }
+        let Some(root) = self.state.root.clone() else {
+            return;
+        };
         let current = self.folder.clone().unwrap_or_else(|| root.clone());
         let mut crumbs = vec![(Some(UiIcon::Home), "Library root".to_owned(), root.clone())];
         if let Ok(relative) = current.strip_prefix(&root) {
             let mut cursor = root.clone();
             for part in relative.components() {
                 cursor.push(part.as_os_str());
-                crumbs.push((None, part.as_os_str().to_string_lossy().to_string(), cursor.clone()));
+                crumbs.push((
+                    None,
+                    part.as_os_str().to_string_lossy().to_string(),
+                    cursor.clone(),
+                ));
             }
         }
         ui.horizontal_wrapped(|ui| {
             for (index, (icon, label, target)) in crumbs.into_iter().enumerate() {
                 if index > 0 {
-                    let (rect, _) = ui.allocate_exact_size(Vec2::new(14.0, 24.0), egui::Sense::hover());
-                    paint_icon(ui.painter(), rect, UiIcon::ChevronRight, Color32::from_rgb(159, 178, 196));
+                    let (rect, _) =
+                        ui.allocate_exact_size(Vec2::new(14.0, 24.0), egui::Sense::hover());
+                    paint_icon(
+                        ui.painter(),
+                        rect,
+                        UiIcon::ChevronRight,
+                        Color32::from_rgb(159, 178, 196),
+                    );
                 }
                 let clicked = if let Some(icon) = icon {
                     icon_label_button(
@@ -1427,14 +1709,24 @@ impl Eder {
                         Color32::from_rgb(57, 80, 105),
                         12.0,
                         7.0,
-                    ).clicked()
+                    )
+                    .clicked()
                 } else {
-                    ui.add(egui::Button::new(RichText::new(label).size(12.0)
-                            .color(Color32::from_rgb(57, 80, 105)))
-                            .fill(Color32::from_rgb(238, 243, 249)).rounding(7.0)).clicked()
+                    ui.add(
+                        egui::Button::new(
+                            RichText::new(label)
+                                .size(12.0)
+                                .color(Color32::from_rgb(57, 80, 105)),
+                        )
+                        .fill(Color32::from_rgb(238, 243, 249))
+                        .rounding(7.0),
+                    )
+                    .clicked()
                 };
                 if clicked {
-                    if self.folder.as_ref() != Some(&target) { self.browse_folder(target); }
+                    if self.folder.as_ref() != Some(&target) {
+                        self.browse_folder(target);
+                    }
                 }
             }
         });
@@ -1456,7 +1748,12 @@ impl Eder {
             self.load();
         }
         ui.add_space(24.0);
-        ui.label(RichText::new("Your library,\non your device.").size(42.0).strong().color(INK));
+        ui.label(
+            RichText::new("Your library,\non your device.")
+                .size(42.0)
+                .strong()
+                .color(INK),
+        );
         ui.label("Choose the folder containing your PDFs. Subfolders stay organized as they are.");
         ui.add_space(18.0);
         ui.label(RichText::new("Library folder").strong());
@@ -1552,7 +1849,7 @@ impl Eder {
                 ui.set_min_height(TILE_HEIGHT);
                 egui::Frame::none()
                     .fill(LIGHT)
-                    .stroke(egui::Stroke::new(1.0, HAIRLINE))
+                    .stroke(egui::Stroke::new(1.0_f32, HAIRLINE))
                     .rounding(2.0)
                     .inner_margin(PADDING)
                     .show(ui, |ui| {
@@ -1602,7 +1899,8 @@ impl Eder {
                             let scale = ((rect.width() - 16.0) / size.x)
                                 .min((rect.height() - 12.0) / size.y)
                                 .min(1.0);
-                            let image_rect = egui::Rect::from_center_size(rect.center(), size * scale);
+                            let image_rect =
+                                egui::Rect::from_center_size(rect.center(), size * scale);
                             ui.painter().image(
                                 texture.id(),
                                 image_rect,
@@ -1610,10 +1908,8 @@ impl Eder {
                                 Color32::WHITE,
                             );
                         } else {
-                            let paper = egui::Rect::from_center_size(
-                                rect.center(),
-                                Vec2::new(85.0, 112.0),
-                            );
+                            let paper =
+                                egui::Rect::from_center_size(rect.center(), Vec2::new(85.0, 112.0));
                             ui.painter().rect_filled(paper, 5.0, Color32::WHITE);
                             ui.painter().text(
                                 paper.center(),
@@ -1624,7 +1920,10 @@ impl Eder {
                             );
                         }
 
-                        if response.on_hover_text(e.path.display().to_string()).clicked() {
+                        if response
+                            .on_hover_text(e.path.display().to_string())
+                            .clicked()
+                        {
                             if e.directory {
                                 self.folder = Some(e.path.clone());
                                 self.load();
@@ -1672,10 +1971,15 @@ impl Eder {
                             let favored = self.favorite_set.contains(&e.path);
                             ui.horizontal(|ui| {
                                 ui.spacing_mut().item_spacing.x = 5.0;
-                                let remove_width = if self.view == View::Reading { 34.0 } else { 0.0 };
-                                let favorite_width = (content_width - remove_width
+                                let remove_width = if self.view == View::Reading {
+                                    34.0
+                                } else {
+                                    0.0
+                                };
+                                let favorite_width = (content_width
+                                    - remove_width
                                     - if remove_width > 0.0 { 5.0 } else { 0.0 })
-                                    .max(24.0);
+                                .max(24.0);
                                 if icon_label_button(
                                     ui,
                                     UiIcon::Star,
@@ -1685,7 +1989,9 @@ impl Eder {
                                     ui.visuals().text_color(),
                                     12.0,
                                     4.0,
-                                ).clicked() {
+                                )
+                                .clicked()
+                                {
                                     self.send(Task::Favorite(e.path.clone(), !favored));
                                 }
                                 if self.view == View::Reading
@@ -1698,7 +2004,11 @@ impl Eder {
                                         ui.visuals().text_color(),
                                         12.0,
                                         4.0,
-                                    ).on_hover_text("Remove from Currently Reading (PDF stays on disk)").clicked()
+                                    )
+                                    .on_hover_text(
+                                        "Remove from Currently Reading (PDF stays on disk)",
+                                    )
+                                    .clicked()
                                 {
                                     self.send(Task::Remove(e.path.clone()));
                                 }
@@ -1710,57 +2020,100 @@ impl Eder {
     }
 
     fn document_row(&mut self, ui: &mut egui::Ui, e: &Entry) {
-        if !e.directory && e.available && !self.textures.contains_key(&e.path)
-            && !self.pending.contains(&e.path) && self.thumb_tx.try_send(ThumbJob {
-                path: e.path.clone(), id: self.thumb_gen.load(Ordering::Acquire),
-            }).is_ok() {
+        if !e.directory
+            && e.available
+            && !self.textures.contains_key(&e.path)
+            && !self.pending.contains(&e.path)
+            && self
+                .thumb_tx
+                .try_send(ThumbJob {
+                    path: e.path.clone(),
+                    id: self.thumb_gen.load(Ordering::Acquire),
+                })
+                .is_ok()
+        {
             self.pending.insert(e.path.clone());
         }
-        egui::Frame::none().fill(LIGHT).stroke(egui::Stroke::new(1.0, HAIRLINE)).rounding(2.0).inner_margin(10.0)
+        egui::Frame::none()
+            .fill(LIGHT)
+            .stroke(egui::Stroke::new(1.0_f32, HAIRLINE))
+            .rounding(2.0)
+            .inner_margin(10.0)
             .show(ui, |ui| {
                 ui.set_min_height(63.0);
                 ui.horizontal(|ui| {
-                    let (rect, response) = ui.allocate_exact_size(Vec2::new(50.0, 62.0), egui::Sense::click());
+                    let (rect, response) =
+                        ui.allocate_exact_size(Vec2::new(50.0, 62.0), egui::Sense::click());
                     ui.painter().rect_filled(rect, 5.0, SAGE);
                     if let Some(Some(texture)) = self.textures.get(&e.path) {
                         let size = texture.size_vec2();
-                        let scale = (rect.width()/size.x).min(rect.height()/size.y).min(1.0);
-                        ui.painter().image(texture.id(), egui::Rect::from_center_size(rect.center(), size*scale),
-                            egui::Rect::from_min_max(egui::Pos2::ZERO, egui::pos2(1.0, 1.0)), Color32::WHITE);
+                        let scale = (rect.width() / size.x).min(rect.height() / size.y).min(1.0);
+                        ui.painter().image(
+                            texture.id(),
+                            egui::Rect::from_center_size(rect.center(), size * scale),
+                            egui::Rect::from_min_max(egui::Pos2::ZERO, egui::pos2(1.0, 1.0)),
+                            Color32::WHITE,
+                        );
                     } else {
                         if e.directory {
                             paint_icon(ui.painter(), rect.shrink(15.0), UiIcon::Folder, TEAL);
                         } else {
-                            ui.painter().text(rect.center(), egui::Align2::CENTER_CENTER,
-                                "PDF", egui::FontId::proportional(15.0), TEAL);
+                            ui.painter().text(
+                                rect.center(),
+                                egui::Align2::CENTER_CENTER,
+                                "PDF",
+                                egui::FontId::proportional(15.0),
+                                TEAL,
+                            );
                         }
                     }
                     if response.clicked() && e.available {
-                        if e.directory { self.browse_folder(e.path.clone()); }
-                        else { self.open(e.path.clone(), false); }
+                        if e.directory {
+                            self.browse_folder(e.path.clone());
+                        } else {
+                            self.open(e.path.clone(), false);
+                        }
                     }
                     ui.vertical(|ui| {
-                        let name = ui.add(egui::Button::new(RichText::new(&e.name).strong())
-                            .frame(false).truncate());
-                        if name.on_hover_text(e.path.display().to_string()).clicked() && e.available {
-                            if e.directory { self.browse_folder(e.path.clone()); }
-                            else { self.open(e.path.clone(), false); }
+                        let name = ui.add(
+                            egui::Button::new(RichText::new(&e.name).strong())
+                                .frame(false)
+                                .truncate(),
+                        );
+                        if name.on_hover_text(e.path.display().to_string()).clicked() && e.available
+                        {
+                            if e.directory {
+                                self.browse_folder(e.path.clone());
+                            } else {
+                                self.open(e.path.clone(), false);
+                            }
                         }
-                        ui.label(RichText::new(if e.directory { "FOLDER" } else { "PDF DOCUMENT" })
-                            .size(11.0).color(MUTED));
+                        ui.label(
+                            RichText::new(if e.directory {
+                                "FOLDER"
+                            } else {
+                                "PDF DOCUMENT"
+                            })
+                            .size(11.0)
+                            .color(MUTED),
+                        );
                     });
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         if !e.directory {
-                            if self.view == View::Reading && icon_label_button(
-                                ui,
-                                UiIcon::Close,
-                                "",
-                                Vec2::new(24.0, 24.0),
-                                ui.visuals().widgets.inactive.bg_fill,
-                                ui.visuals().text_color(),
-                                12.0,
-                                4.0,
-                            ).on_hover_text("Remove from Currently Reading").clicked() {
+                            if self.view == View::Reading
+                                && icon_label_button(
+                                    ui,
+                                    UiIcon::Close,
+                                    "",
+                                    Vec2::new(24.0, 24.0),
+                                    ui.visuals().widgets.inactive.bg_fill,
+                                    ui.visuals().text_color(),
+                                    12.0,
+                                    4.0,
+                                )
+                                .on_hover_text("Remove from Currently Reading")
+                                .clicked()
+                            {
                                 self.send(Task::Remove(e.path.clone()));
                             }
                             let favorite = self.favorite_set.contains(&e.path);
@@ -1773,7 +2126,9 @@ impl Eder {
                                 ui.visuals().text_color(),
                                 11.0,
                                 4.0,
-                            ).clicked() {
+                            )
+                            .clicked()
+                            {
                                 self.send(Task::Favorite(e.path.clone(), !favorite));
                             }
                         }
@@ -1785,9 +2140,16 @@ impl Eder {
     fn browser(&mut self, ui: &mut egui::Ui) {
         if self.view == View::Library && self.state.root.is_none() {
             ui.add_space(50.0);
-            ui.label(RichText::new("A quiet place\nfor your PDFs.").size(39.0).strong().color(INK));
+            ui.label(
+                RichText::new("A quiet place\nfor your PDFs.")
+                    .size(39.0)
+                    .strong()
+                    .color(INK),
+            );
             ui.label("No library folder is configured. Open Settings to choose one.");
-            if ui.button("Open Settings").clicked() { self.change_view(View::Settings); }
+            if ui.button("Open Settings").clicked() {
+                self.change_view(View::Settings);
+            }
             return;
         }
         self.breadcrumbs(ui);
@@ -1806,7 +2168,9 @@ impl Eder {
         if self.entries.is_empty() {
             ui.label(match self.view {
                 View::Library => "No PDFs or subfolders were found.",
-                View::Favorites => "No favorites yet. Select Favorite beside a PDF to keep it here.",
+                View::Favorites => {
+                    "No favorites yet. Select Favorite beside a PDF to keep it here."
+                }
                 _ => "PDFs you open appear in Currently Reading.",
             });
             return;
@@ -1818,23 +2182,36 @@ impl Eder {
             self.search_indices = if query.is_empty() {
                 Vec::new()
             } else {
-                self.entries.iter().enumerate()
+                self.entries
+                    .iter()
+                    .enumerate()
                     .filter(|(_, entry)| entry.name.to_lowercase().contains(&query))
-                    .map(|(index, _)| index).collect()
+                    .map(|(index, _)| index)
+                    .collect()
             };
             self.search_query_cached = query.clone();
             self.search_listing = self.listing;
         }
-        let total = if query.is_empty() { self.entries.len() } else { self.search_indices.len() };
+        let total = if query.is_empty() {
+            self.entries.len()
+        } else {
+            self.search_indices.len()
+        };
         if total == 0 {
             ui.label("No matching documents in this folder. Try a different search.");
             return;
         }
         if self.list_view {
-            egui::ScrollArea::vertical().id_salt(("library-list", self.listing))
-                .auto_shrink([false, false]).show_rows(ui, 92.0, total, |ui, range| {
+            egui::ScrollArea::vertical()
+                .id_salt(("library-list", self.listing))
+                .auto_shrink([false, false])
+                .show_rows(ui, 92.0, total, |ui, range| {
                     for index in range {
-                        let actual = if query.is_empty() { index } else { self.search_indices[index] };
+                        let actual = if query.is_empty() {
+                            index
+                        } else {
+                            self.search_indices[index]
+                        };
                         if let Some(entry) = self.entries.get(actual).cloned() {
                             ui.push_id(&entry.path, |ui| self.document_row(ui, &entry));
                         }
@@ -1860,7 +2237,9 @@ impl Eder {
                         ui.spacing_mut().item_spacing.x = GAP;
                         for col in 0..columns {
                             let index = row_index * columns + col;
-                            let actual = if query.is_empty() { index } else {
+                            let actual = if query.is_empty() {
+                                index
+                            } else {
                                 *self.search_indices.get(index).unwrap_or(&usize::MAX)
                             };
                             if let Some(entry) = self.entries.get(actual).cloned() {
@@ -1875,73 +2254,85 @@ impl Eder {
     }
     fn reader_ui(&mut self, ctx: &egui::Context) {
         egui::TopBottomPanel::top("reader_toolbar")
-            .frame(egui::Frame::none().fill(PAPER).inner_margin(egui::Margin::symmetric(20.0, 12.0)))
+            .frame(
+                egui::Frame::none()
+                    .fill(PAPER)
+                    .inner_margin(egui::Margin::symmetric(20.0, 12.0)),
+            )
             .show(ctx, |ui| {
-            ui.horizontal_wrapped(|ui| {
-                if icon_label_button(
-                    ui,
-                    UiIcon::ArrowLeft,
-                    "Back",
-                    Vec2::new(78.0, 28.0),
-                    ui.visuals().widgets.inactive.bg_fill,
-                    ui.visuals().text_color(),
-                    14.0,
-                    4.0,
-                ).clicked() {
-                    self.back();
+                ui.horizontal_wrapped(|ui| {
+                    if icon_label_button(
+                        ui,
+                        UiIcon::ArrowLeft,
+                        "Back",
+                        Vec2::new(78.0, 28.0),
+                        ui.visuals().widgets.inactive.bg_fill,
+                        ui.visuals().text_color(),
+                        14.0,
+                        4.0,
+                    )
+                    .clicked()
+                    {
+                        self.back();
+                        return;
+                    }
+                    if let Some(r) = &self.reader {
+                        ui.label(
+                            RichText::new(r.path.file_name().unwrap_or_default().to_string_lossy())
+                                .strong(),
+                        );
+                    }
+                });
+                if self.reader.is_none() {
                     return;
                 }
-                if let Some(r) = &self.reader {
-                    ui.label(
-                        RichText::new(r.path.file_name().unwrap_or_default().to_string_lossy())
-                            .strong(),
-                    );
-                }
-            });
-            if self.reader.is_none() {
-                return;
-            }
-            let (page, total, path, position) = {
-                let r = self.reader.as_ref().unwrap();
-                (r.page, r.total, r.path.clone(),
-                    r.reading_position(self.state.continuous_scroll))
-            };
-            ui.horizontal_wrapped(|ui| {
-                if ui
-                    .add_enabled(page > 1, egui::Button::new("Previous"))
-                    .clicked()
-                {
-                    self.turn(page - 1);
-                }
-                let mut jump = page;
-                ui.label("Page");
-                if ui
-                    .add(egui::DragValue::new(&mut jump).range(1..=total))
-                    .changed()
-                {
-                    self.turn(jump);
-                }
-                ui.label(format!("of {total}"));
-                if ui
-                    .add_enabled(page < total, egui::Button::new("Next"))
-                    .clicked()
-                {
-                    self.turn(page + 1);
-                }
-                if ui.button("Save Position").clicked() {
-                    if self.send(Task::Position(path, position, true)) {
-                        if let Some(r) = &mut self.reader { r.position_changed_at = None; }
+                let (page, total, path, position) = {
+                    let r = self.reader.as_ref().unwrap();
+                    (
+                        r.page,
+                        r.total,
+                        r.path.clone(),
+                        r.reading_position(self.state.continuous_scroll),
+                    )
+                };
+                ui.horizontal_wrapped(|ui| {
+                    if ui
+                        .add_enabled(page > 1, egui::Button::new("Previous"))
+                        .clicked()
+                    {
+                        self.turn(page - 1);
                     }
-                }
-                let mut dark = self.state.dark;
-                if ui.checkbox(&mut dark, "Dark pages").changed() {
-                    self.send(Task::Dark(dark));
-                }
-                if let Some(r) = &mut self.reader {
-                    ui.add(egui::Slider::new(&mut r.zoom, 0.5..=3.0).text("Zoom"));
-                }
+                    let mut jump = page;
+                    ui.label("Page");
+                    if ui
+                        .add(egui::DragValue::new(&mut jump).range(1..=total))
+                        .changed()
+                    {
+                        self.turn(jump);
+                    }
+                    ui.label(format!("of {total}"));
+                    if ui
+                        .add_enabled(page < total, egui::Button::new("Next"))
+                        .clicked()
+                    {
+                        self.turn(page + 1);
+                    }
+                    if ui.button("Save Position").clicked() {
+                        if self.send(Task::Position(path, position, true)) {
+                            if let Some(r) = &mut self.reader {
+                                r.position_changed_at = None;
+                            }
+                        }
+                    }
+                    let mut dark = self.state.dark;
+                    if ui.checkbox(&mut dark, "Dark pages").changed() {
+                        self.send(Task::Dark(dark));
+                    }
+                    if let Some(r) = &mut self.reader {
+                        ui.add(egui::Slider::new(&mut r.zoom, 0.5..=3.0).text("Zoom"));
+                    }
+                });
             });
-        });
         if self.reader.is_none() {
             return;
         }
@@ -2046,8 +2437,8 @@ impl Eder {
             .zip(previous_offset)
             .filter(|(previous, _)| (*previous - row_stride).abs() > f32::EPSILON)
             .map(|(previous, offset)| offset * row_stride / previous);
-        let initial_anchor = scroll_to.map(|anchor|
-            ReadingPosition::new(anchor.page.clamp(1, total), anchor.fraction));
+        let initial_anchor = scroll_to
+            .map(|anchor| ReadingPosition::new(anchor.page.clamp(1, total), anchor.fraction));
         let mut visible_pages = Vec::new();
         let mut retry_page = None;
         let mut internal_jump = None;
@@ -2056,7 +2447,9 @@ impl Eder {
             for index in range {
                 let page = index as u32 + 1;
                 let reader = self.reader.as_ref().unwrap();
-                let texture = reader.cache.iter()
+                let texture = reader
+                    .cache
+                    .iter()
                     .filter(|item| item.page == page && item.dark == self.state.dark)
                     .max_by_key(|item| item.edge)
                     .map(|item| item.texture.clone());
@@ -2073,9 +2466,11 @@ impl Eder {
                             let scale = (available * zoom / image_size.x)
                                 .min(available_height / image_size.y);
                             let image_size = image_size * scale;
-                            let image = ui.add(egui::Image::new(&texture).fit_to_exact_size(image_size));
+                            let image =
+                                ui.add(egui::Image::new(&texture).fit_to_exact_size(image_size));
                             if let Some(links) = reader.links.get(&page) {
-                                if let Some(target) = clicked_pdf_link(ui, image.rect, page, links) {
+                                if let Some(target) = clicked_pdf_link(ui, image.rect, page, links)
+                                {
                                     internal_jump = Some(target);
                                 }
                             }
@@ -2101,7 +2496,10 @@ impl Eder {
                 .show_rows(ui, row_height, total as usize, &mut draw_pages)
         } else if let Some(offset) = resized_offset {
             scroll_area.vertical_scroll_offset(offset).show_rows(
-                ui, row_height, total as usize, &mut draw_pages,
+                ui,
+                row_height,
+                total as usize,
+                &mut draw_pages,
             )
         } else {
             scroll_area.show_rows(ui, row_height, total as usize, &mut draw_pages)
@@ -2117,8 +2515,10 @@ impl Eder {
         // Touch visible textures to keep actually-used pages at the back of the LRU.
         if let Some(reader) = &mut self.reader {
             for &page in &visible_pages {
-                if let Some(index) = reader.cache.iter().position(|item|
-                    item.page == page && item.dark == self.state.dark)
+                if let Some(index) = reader
+                    .cache
+                    .iter()
+                    .position(|item| item.page == page && item.dark == self.state.dark)
                 {
                     let item = reader.cache.remove(index).unwrap();
                     reader.cache.push_back(item);
@@ -2128,7 +2528,14 @@ impl Eder {
         // A full link-worker queue must not permanently lose link metadata.
         // Retry it opportunistically for already-rendered visible pages.
         for &page in &visible_pages {
-            if self.reader.as_ref().unwrap().cache.iter().any(|item| item.page == page) {
+            if self
+                .reader
+                .as_ref()
+                .unwrap()
+                .cache
+                .iter()
+                .any(|item| item.page == page)
+            {
                 self.queue_links(page);
             }
         }
@@ -2164,15 +2571,16 @@ fn clicked_pdf_link(
             continue;
         }
         let response = ui
-            .interact(rect, ui.id().with(("pdf-link", page, index)), egui::Sense::click())
+            .interact(
+                rect,
+                ui.id().with(("pdf-link", page, index)),
+                egui::Sense::click(),
+            )
             .on_hover_cursor(egui::CursorIcon::PointingHand)
             .on_hover_text(format!("Go to page {}", link.target_page));
         if response.hovered() {
-            ui.painter().rect_filled(
-                rect,
-                2.0,
-                Color32::from_rgba_unmultiplied(34, 129, 111, 34),
-            );
+            ui.painter()
+                .rect_filled(rect, 2.0, Color32::from_rgba_unmultiplied(34, 129, 111, 34));
         }
         if response.clicked() {
             destination = Some(link.target_page);
@@ -2193,7 +2601,9 @@ impl eframe::App for Eder {
             if !self.closing {
                 let save = if let Some(r) = &self.reader {
                     self.send(Task::Position(
-                        r.path.clone(), r.reading_position(self.state.continuous_scroll), false,
+                        r.path.clone(),
+                        r.reading_position(self.state.continuous_scroll),
+                        false,
                     ))
                 } else {
                     true
@@ -2216,7 +2626,9 @@ impl eframe::App for Eder {
                         } else {
                             Color32::from_rgb(20, 100, 80)
                         }));
-                        if ui.small_button("Dismiss").clicked() { self.message = None; }
+                        if ui.small_button("Dismiss").clicked() {
+                            self.message = None;
+                        }
                     }
                 });
             });
@@ -2227,33 +2639,51 @@ impl eframe::App for Eder {
             self.flush_position_if_idle(ctx);
             return;
         }
-        if ctx.input(|input| (input.modifiers.command || input.modifiers.ctrl)
-            && input.key_pressed(egui::Key::K)) {
+        if ctx.input(|input| {
+            (input.modifiers.command || input.modifiers.ctrl) && input.key_pressed(egui::Key::K)
+        }) {
             ctx.memory_mut(|m| m.request_focus(egui::Id::new("eder-search")));
         }
         if ctx.screen_rect().width() > 820.0 {
             egui::SidePanel::left("sidebar")
                 .exact_width(265.0)
-                .frame(egui::Frame::none().fill(PAPER)
-                    .inner_margin(egui::Margin::symmetric(23.0, 8.0)))
+                .frame(
+                    egui::Frame::none()
+                        .fill(PAPER)
+                        .inner_margin(egui::Margin::symmetric(23.0, 8.0)),
+                )
                 .show(ctx, |ui| self.sidebar(ui));
         } else {
-            egui::TopBottomPanel::top("compact_navigation")
-                .show(ctx, |ui| self.compact_nav(ui));
+            egui::TopBottomPanel::top("compact_navigation").show(ctx, |ui| self.compact_nav(ui));
         }
         let available = ctx.available_rect().width();
-        let header_height = if self.view == View::Settings { 103.0 } else if available < 770.0 { 157.0 } else { 151.0 };
+        let header_height = if self.view == View::Settings {
+            103.0
+        } else if available < 770.0 {
+            157.0
+        } else {
+            151.0
+        };
         egui::TopBottomPanel::top("library_toolbar")
             .exact_height(header_height)
-            .frame(egui::Frame::none().fill(PAPER).inner_margin(egui::Margin::symmetric(27.0, 13.0)))
+            .frame(
+                egui::Frame::none()
+                    .fill(PAPER)
+                    .inner_margin(egui::Margin::symmetric(27.0, 13.0)),
+            )
             .show(ctx, |ui| self.toolbar(ui));
         egui::CentralPanel::default()
-            .frame(egui::Frame::none().fill(PAPER)
-                .inner_margin(egui::Margin::symmetric(27.0, 20.0)))
+            .frame(
+                egui::Frame::none()
+                    .fill(PAPER)
+                    .inner_margin(egui::Margin::symmetric(27.0, 20.0)),
+            )
             .show(ctx, |ui| {
                 if self.view == View::Settings {
                     egui::ScrollArea::vertical().show(ui, |ui| self.settings(ui));
-                } else { self.browser(ui); }
+                } else {
+                    self.browser(ui);
+                }
             });
         if self.dialog.is_some() || self.file_dialog.is_some() {
             ctx.request_repaint_after(Duration::from_millis(100));
@@ -2378,7 +2808,10 @@ mod tests {
         app.turn(0);
         assert_eq!(app.reader.as_ref().unwrap().page, 1);
         assert!(app.reader.as_ref().unwrap().position_changed_at.is_some());
-        assert!(_tasks.try_recv().is_err(), "Normal navigation must not write a position per page");
+        assert!(
+            _tasks.try_recv().is_err(),
+            "Normal navigation must not write a position per page"
+        );
 
         app.state.continuous_scroll = true;
         app.reader.as_mut().unwrap().total = 20;
@@ -2391,10 +2824,14 @@ mod tests {
         assert_eq!(restored.page, 6);
         assert!((restored.fraction - saved.fraction).abs() < 0.001);
         app.turn(8);
-        assert_eq!(app.reader.as_ref().unwrap().reading_position(true),
-            ReadingPosition::new(8, 0.0));
-        assert_eq!(app.reader.as_ref().unwrap().scroll_to,
-            Some(ReadingPosition::new(8, 0.0)));
+        assert_eq!(
+            app.reader.as_ref().unwrap().reading_position(true),
+            ReadingPosition::new(8, 0.0)
+        );
+        assert_eq!(
+            app.reader.as_ref().unwrap().scroll_to,
+            Some(ReadingPosition::new(8, 0.0))
+        );
 
         let reader = app.reader.as_mut().unwrap();
         reader.total = 10_000;
@@ -2423,8 +2860,10 @@ mod tests {
         );
         let previous_generation = app.page_gen.load(Ordering::Acquire);
         app.queue_continuous_pages(&[5_000]);
-        assert!(app.page_gen.load(Ordering::Acquire) > previous_generation,
-            "A distant jump should cancel a render far outside the viewport");
+        assert!(
+            app.page_gen.load(Ordering::Acquire) > previous_generation,
+            "A distant jump should cancel a render far outside the viewport"
+        );
         assert!(
             app.reader.as_ref().unwrap().queued_pages.contains(&4_998),
             "Pages behind the visible range should be prefetched"
@@ -2441,6 +2880,9 @@ mod tests {
         let wide = Eder::page_edge(Vec2::new(1100.0, 700.0), 1.0, 1.0, true);
         assert!(compact < wide);
         assert!(wide <= render::PAGE_EDGE);
-        assert_eq!(        Eder::page_edge(Vec2::new(3000.0, 2000.0), 3.0, 2.0, true), render::PAGE_EDGE);
+        assert_eq!(
+            Eder::page_edge(Vec2::new(3000.0, 2000.0), 3.0, 2.0, true),
+            render::PAGE_EDGE
+        );
     }
 }
