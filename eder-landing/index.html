@@ -581,6 +581,26 @@
             color: #d6f4ef
         }
 
+        .final-links .download-link {
+            display: inline-flex;
+            align-items: center;
+            gap: 14px;
+            padding: 17px 22px;
+            background: var(--teal);
+            border: 1px solid #43c2b4;
+            color: #071820;
+            font-size: 12px;
+            font-weight: 800;
+            letter-spacing: .08em;
+            text-transform: uppercase;
+            transition: background .2s, gap .2s
+        }
+
+        .final-links .download-link:hover {
+            background: #43c2b4;
+            gap: 20px
+        }
+
         .command {
             font: 13px/1.8 ui-monospace, SFMono-Regular, Consolas, monospace;
             background: #05161d;
@@ -995,14 +1015,15 @@
                 <div>
                     <div class="kicker">05 / Begin reading</div>
                     <h2>Your library.<br>Your space.</h2>
-                    <p>Eder can be built from source for Linux, macOS, and Windows. Linux is the currently validated
-                        desktop platform. A Linux x86-64 executable is included with the product delivery archive.</p>
-                    <div class="command">$ cargo build --locked --release<br>$ ./target/release/eder</div>
+                    <p>Download Eder 0.1.0 for Linux (x86-64) as an AppImage, or visit the GitHub repository for the
+                        source code and release details.</p>
                 </div>
-                <div class="final-links"><a href="#the-app" class="text-link">See the application <span>↗</span></a><a
-                        href="#technology" class="text-link">Explore the technology <span>↗</span></a>
-                    <p style="font-size:12px;max-width:350px">Release link not yet configured. Add your repository or
-                        hosted release URL before publishing a download button.</p>
+                <div class="final-links">
+                    <a class="download-link"
+                        href="https://github.com/carbonanik/eder/releases/download/v0.1.0/eder-0.1.0-x86_64.AppImage"
+                        target="_blank" rel="noopener noreferrer">Download AppImage <span>↗</span></a>
+                    <a href="https://github.com/carbonanik/eder" class="text-link" target="_blank"
+                        rel="noopener noreferrer">View on GitHub <span>↗</span></a>
                 </div>
             </div>
         </section>

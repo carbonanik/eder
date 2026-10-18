@@ -1,0 +1,1 @@
+curl -fL --retry 2 --connect-timeout 15 --max-time 120 -o /tmp/appimagetool-x86_64.AppImage https://github.com/AppImage/Appimagetool/releases/download/continuous/appimagetool-x86_64.AppImage && chmod +x /tmp/appimagetool-x86_64.AppImage && ls -lh /tmp/appimagetool-x86_64.AppImage
