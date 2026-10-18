@@ -228,31 +228,35 @@ fn paint_icon(painter: &egui::Painter, rect: egui::Rect, icon: UiIcon, color: Co
     }
 }
 
-fn icon_label_button(
-    ui: &mut egui::Ui,
-    icon: UiIcon,
-    label: &str,
+struct IconLabelStyle {
     size: Vec2,
     fill: Color32,
     color: Color32,
     text_size: f32,
     rounding: f32,
+}
+
+fn icon_label_button(
+    ui: &mut egui::Ui,
+    icon: UiIcon,
+    label: &str,
+    style: IconLabelStyle,
 ) -> egui::Response {
     let response = ui.add(
         egui::Button::new(
             RichText::new(label)
-                .size(text_size)
+                .size(style.text_size)
                 .color(Color32::TRANSPARENT),
         )
-        .min_size(size)
-        .fill(fill)
-        .rounding(rounding),
+        .min_size(style.size)
+        .fill(style.fill)
+        .rounding(style.rounding),
     );
-    let icon_size = 18.0_f32.min(size.y * 0.55);
+    let icon_size = 18.0_f32.min(style.size.y * 0.55);
     let galley = ui.painter().layout_no_wrap(
         label.to_owned(),
-        egui::FontId::proportional(text_size),
-        color,
+        egui::FontId::proportional(style.text_size),
+        style.color,
     );
     let gap = if label.is_empty() { 0.0 } else { 8.0 };
     let group_width = icon_size + gap + galley.size().x;
@@ -265,7 +269,7 @@ fn icon_label_button(
             Vec2::splat(icon_size),
         ),
         icon,
-        color,
+        style.color,
     );
     if !label.is_empty() {
         ui.painter().galley(
@@ -274,7 +278,7 @@ fn icon_label_button(
                 response.rect.center().y - galley.size().y * 0.5,
             ),
             galley,
-            color,
+            style.color,
         );
     }
     response
@@ -699,7 +703,7 @@ impl Eder {
                         ctx.request_repaint();
                     }
                     render_count += 1;
-                    if render_count % 24 == 0 {
+                    if render_count.is_multiple_of(24) {
                         let _ = cache_maint_tx.try_send(());
                     }
                 }
@@ -981,7 +985,7 @@ impl Eder {
         }
         let forward = reader
             .last_visible_page
-            .map_or(true, |previous| first >= previous);
+            .is_none_or(|previous| first >= previous);
         reader.last_visible_page = Some(first);
         let mut desired = visible.to_vec();
         // Prefetch in scroll direction first; never spend the pipeline on distant pages.
@@ -1458,11 +1462,13 @@ impl Eder {
                     ui,
                     UiIcon::Plus,
                     "Add document",
-                    Vec2::new(button_width, 44.0),
-                    DEEP,
-                    LIGHT,
-                    13.0,
-                    2.0,
+                    IconLabelStyle {
+                        size: Vec2::new(button_width, 44.0),
+                        fill: DEEP,
+                        color: LIGHT,
+                        text_size: 13.0,
+                        rounding: 2.0,
+                    },
                 )
             })
             .inner;
@@ -1522,11 +1528,13 @@ impl Eder {
                 ui,
                 UiIcon::Plus,
                 "Add PDF",
-                Vec2::new(120.0, 30.0),
-                ui.visuals().widgets.inactive.bg_fill,
-                ui.visuals().text_color(),
-                14.0,
-                4.0,
+                IconLabelStyle {
+                    size: Vec2::new(120.0, 30.0),
+                    fill: ui.visuals().widgets.inactive.bg_fill,
+                    color: ui.visuals().text_color(),
+                    text_size: 14.0,
+                    rounding: 4.0,
+                },
             )
             .clicked()
             {
@@ -1583,11 +1591,13 @@ impl Eder {
             ui,
             UiIcon::Grid,
             "",
-            Vec2::new(42.0, 38.0),
-            if self.list_view { unselected } else { selected },
-            if self.list_view { dark } else { Color32::WHITE },
-            18.0,
-            8.0,
+            IconLabelStyle {
+                size: Vec2::new(42.0, 38.0),
+                fill: if self.list_view { unselected } else { selected },
+                color: if self.list_view { dark } else { Color32::WHITE },
+                text_size: 18.0,
+                rounding: 8.0,
+            },
         )
         .on_hover_text("Grid view")
         .clicked()
@@ -1598,11 +1608,13 @@ impl Eder {
             ui,
             UiIcon::List,
             "",
-            Vec2::new(42.0, 38.0),
-            if self.list_view { selected } else { unselected },
-            if self.list_view { Color32::WHITE } else { dark },
-            18.0,
-            8.0,
+            IconLabelStyle {
+                size: Vec2::new(42.0, 38.0),
+                fill: if self.list_view { selected } else { unselected },
+                color: if self.list_view { Color32::WHITE } else { dark },
+                text_size: 18.0,
+                rounding: 8.0,
+            },
         )
         .on_hover_text("List view")
         .clicked()
@@ -1640,9 +1652,7 @@ impl Eder {
             ui.add_space(10.0);
             ui.horizontal(|ui| {
                 let controls_width = if compact { 140.0 } else { 210.0 };
-                let search_width = (ui.available_width() - controls_width)
-                    .min(400.0)
-                    .max(120.0);
+                let search_width = (ui.available_width() - controls_width).clamp(120.0, 400.0);
                 self.toolbar_search(ui, search_width);
                 if ui.available_width() > 90.0 {
                     self.view_toggle(ui);
@@ -1652,11 +1662,13 @@ impl Eder {
                         ui,
                         UiIcon::Refresh,
                         "",
-                        Vec2::new(36.0, 36.0),
-                        SAGE,
-                        INK,
-                        12.0,
-                        2.0,
+                        IconLabelStyle {
+                            size: Vec2::new(36.0, 36.0),
+                            fill: SAGE,
+                            color: INK,
+                            text_size: 12.0,
+                            rounding: 2.0,
+                        },
                     )
                     .on_hover_text("Refresh documents")
                     .clicked()
@@ -1704,11 +1716,13 @@ impl Eder {
                         ui,
                         icon,
                         &label,
-                        Vec2::new(116.0, 30.0),
-                        Color32::from_rgb(238, 243, 249),
-                        Color32::from_rgb(57, 80, 105),
-                        12.0,
-                        7.0,
+                        IconLabelStyle {
+                            size: Vec2::new(116.0, 30.0),
+                            fill: Color32::from_rgb(238, 243, 249),
+                            color: Color32::from_rgb(57, 80, 105),
+                            text_size: 12.0,
+                            rounding: 7.0,
+                        },
                     )
                     .clicked()
                 } else {
@@ -1723,10 +1737,8 @@ impl Eder {
                     )
                     .clicked()
                 };
-                if clicked {
-                    if self.folder.as_ref() != Some(&target) {
-                        self.browse_folder(target);
-                    }
+                if clicked && self.folder.as_ref() != Some(&target) {
+                    self.browse_folder(target);
                 }
             }
         });
@@ -1737,11 +1749,13 @@ impl Eder {
             ui,
             UiIcon::ArrowLeft,
             "Back to Library",
-            Vec2::new(150.0, 30.0),
-            ui.visuals().widgets.inactive.bg_fill,
-            ui.visuals().text_color(),
-            14.0,
-            4.0,
+            IconLabelStyle {
+                size: Vec2::new(150.0, 30.0),
+                fill: ui.visuals().widgets.inactive.bg_fill,
+                color: ui.visuals().text_color(),
+                text_size: 14.0,
+                rounding: 4.0,
+            },
         );
         if back.clicked() {
             self.view = View::Library;
@@ -1984,11 +1998,13 @@ impl Eder {
                                     ui,
                                     UiIcon::Star,
                                     if favored { "Saved" } else { "Favorite" },
-                                    Vec2::new(favorite_width, 26.0),
-                                    ui.visuals().widgets.inactive.bg_fill,
-                                    ui.visuals().text_color(),
-                                    12.0,
-                                    4.0,
+                                    IconLabelStyle {
+                                        size: Vec2::new(favorite_width, 26.0),
+                                        fill: ui.visuals().widgets.inactive.bg_fill,
+                                        color: ui.visuals().text_color(),
+                                        text_size: 12.0,
+                                        rounding: 4.0,
+                                    },
                                 )
                                 .clicked()
                                 {
@@ -1999,11 +2015,13 @@ impl Eder {
                                         ui,
                                         UiIcon::Close,
                                         "",
-                                        Vec2::new(remove_width, 26.0),
-                                        ui.visuals().widgets.inactive.bg_fill,
-                                        ui.visuals().text_color(),
-                                        12.0,
-                                        4.0,
+                                        IconLabelStyle {
+                                            size: Vec2::new(remove_width, 26.0),
+                                            fill: ui.visuals().widgets.inactive.bg_fill,
+                                            color: ui.visuals().text_color(),
+                                            text_size: 12.0,
+                                            rounding: 4.0,
+                                        },
                                     )
                                     .on_hover_text(
                                         "Remove from Currently Reading (PDF stays on disk)",
@@ -2105,11 +2123,13 @@ impl Eder {
                                     ui,
                                     UiIcon::Close,
                                     "",
-                                    Vec2::new(24.0, 24.0),
-                                    ui.visuals().widgets.inactive.bg_fill,
-                                    ui.visuals().text_color(),
-                                    12.0,
-                                    4.0,
+                                    IconLabelStyle {
+                                        size: Vec2::new(24.0, 24.0),
+                                        fill: ui.visuals().widgets.inactive.bg_fill,
+                                        color: ui.visuals().text_color(),
+                                        text_size: 12.0,
+                                        rounding: 4.0,
+                                    },
                                 )
                                 .on_hover_text("Remove from Currently Reading")
                                 .clicked()
@@ -2121,11 +2141,13 @@ impl Eder {
                                 ui,
                                 UiIcon::Star,
                                 if favorite { "Saved" } else { "Favorite" },
-                                Vec2::new(86.0, 24.0),
-                                ui.visuals().widgets.inactive.bg_fill,
-                                ui.visuals().text_color(),
-                                11.0,
-                                4.0,
+                                IconLabelStyle {
+                                    size: Vec2::new(86.0, 24.0),
+                                    fill: ui.visuals().widgets.inactive.bg_fill,
+                                    color: ui.visuals().text_color(),
+                                    text_size: 11.0,
+                                    rounding: 4.0,
+                                },
                             )
                             .clicked()
                             {
@@ -2265,11 +2287,13 @@ impl Eder {
                         ui,
                         UiIcon::ArrowLeft,
                         "Back",
-                        Vec2::new(78.0, 28.0),
-                        ui.visuals().widgets.inactive.bg_fill,
-                        ui.visuals().text_color(),
-                        14.0,
-                        4.0,
+                        IconLabelStyle {
+                            size: Vec2::new(78.0, 28.0),
+                            fill: ui.visuals().widgets.inactive.bg_fill,
+                            color: ui.visuals().text_color(),
+                            text_size: 14.0,
+                            rounding: 4.0,
+                        },
                     )
                     .clicked()
                     {
@@ -2317,11 +2341,11 @@ impl Eder {
                     {
                         self.turn(page + 1);
                     }
-                    if ui.button("Save Position").clicked() {
-                        if self.send(Task::Position(path, position, true)) {
-                            if let Some(r) = &mut self.reader {
-                                r.position_changed_at = None;
-                            }
+                    if ui.button("Save Position").clicked()
+                        && self.send(Task::Position(path, position, true))
+                    {
+                        if let Some(r) = &mut self.reader {
+                            r.position_changed_at = None;
                         }
                     }
                     let mut dark = self.state.dark;
