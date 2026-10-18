@@ -1260,8 +1260,8 @@ impl Eder {
         ui.label(RichText::new("Eder.").size(43.0).strong().color(INK));
         ui.label(RichText::new("A quieter way to read.").size(12.0).color(MUTED));
         ui.add_space(41.0);
-        ui.label(RichText::new("YOUR WORKSPACE").size(10.0).strong().color(MUTED));
-        ui.add_space(12.0);
+        // ui.label(RichText::new("YOUR WORKSPACE").size(10.0).strong().color(MUTED));
+        // ui.add_space(12.0);
         let can_add = self.file_dialog.is_none();
         let button_width = ui.available_width();
         let add = ui.add_enabled_ui(can_add, |ui| {
@@ -1280,14 +1280,11 @@ impl Eder {
                 self.change_view(view);
             }
         }
-        ui.add_space((ui.available_height() - 150.0).max(18.0));
+        ui.add_space((ui.available_height() - 60.0).max(18.0));
         if Self::nav_item(ui, "Settings", UiIcon::Settings, None, self.view == View::Settings, 0.0) {
             self.change_view(View::Settings);
         }
         ui.add_space(22.0);
-        ui.label(RichText::new("LOCAL FIRST / NO ACCOUNT").size(10.0).strong().color(TEAL));
-        ui.add_space(4.0);
-        ui.label(RichText::new("Your documents stay yours.").size(11.0).color(MUTED));
     }
 
     fn compact_nav(&mut self, ui: &mut egui::Ui) {
