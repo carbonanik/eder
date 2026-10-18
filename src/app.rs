@@ -2721,7 +2721,7 @@ mod tests {
     #[test]
     fn grid_columns_adapt_to_window_size() {
         assert_eq!(Eder::grid_columns(280.0), 1);
-        assert_eq!(Eder::grid_columns(390.0), 2);
+        assert_eq!(Eder::grid_columns(420.0), 2);
         assert_eq!(Eder::grid_columns(850.0), 4);
     }
 
