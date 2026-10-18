@@ -59,6 +59,16 @@ enum Event {
     ReadingMode(bool),
     Closed,
 }
+// Minimal Editorial design tokens — restrained native desktop palette.
+const PAPER: Color32 = Color32::from_rgb(244, 241, 233);
+const INK: Color32 = Color32::from_rgb(16, 31, 36);
+const DEEP: Color32 = Color32::from_rgb(9, 33, 43);
+const TEAL: Color32 = Color32::from_rgb(21, 157, 153);
+const MUTED: Color32 = Color32::from_rgb(104, 119, 122);
+const SAGE: Color32 = Color32::from_rgb(223, 233, 228);
+const LIGHT: Color32 = Color32::from_rgb(250, 249, 245);
+const HAIRLINE: Color32 = Color32::from_rgb(204, 212, 207);
+
 const PAGE_CACHE_BUDGET: usize = 160 * 1024 * 1024;
 const POSITION_SAVE_DELAY: Duration = Duration::from_millis(650);
 
@@ -215,7 +225,11 @@ fn icon_label_button(
     rounding: f32,
 ) -> egui::Response {
     let response = ui.add(
-        egui::Button::new(RichText::new(label).size(text_size).color(color))
+        egui::Button::new(
+            RichText::new(label)
+                .size(text_size)
+                .color(Color32::TRANSPARENT),
+        )
             .min_size(size)
             .fill(fill)
             .rounding(rounding),
@@ -227,7 +241,9 @@ fn icon_label_button(
         color,
     );
     let gap = if label.is_empty() { 0.0 } else { 8.0 };
-    let icon_center_x = response.rect.center().x - galley.size().x * 0.5 - gap - icon_size * 0.5;
+    let group_width = icon_size + gap + galley.size().x;
+    let group_left = response.rect.center().x - group_width * 0.5;
+    let icon_center_x = group_left + icon_size * 0.5;
     paint_icon(
         ui.painter(),
         egui::Rect::from_center_size(
@@ -237,6 +253,16 @@ fn icon_label_button(
         icon,
         color,
     );
+    if !label.is_empty() {
+        ui.painter().galley(
+            egui::pos2(
+                group_left + icon_size + gap,
+                response.rect.center().y - galley.size().y * 0.5,
+            ),
+            galley,
+            color,
+        );
+    }
     response
 }
 
@@ -528,12 +554,26 @@ fn data_worker(
 impl Eder {
     pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
         let mut style = (*cc.egui_ctx.style()).clone();
-        style.spacing.item_spacing = Vec2::new(12.0, 10.0);
+        style.spacing.item_spacing = Vec2::new(14.0, 12.0);
         style.spacing.button_padding = Vec2::new(12.0, 9.0);
         style.visuals = egui::Visuals::light();
-        style.visuals.panel_fill = Color32::from_rgb(247, 248, 250);
-        style.visuals.selection.bg_fill = Color32::from_rgb(209, 228, 225);
-        style.visuals.selection.stroke.color = Color32::from_rgb(18, 92, 81);
+        style.visuals.panel_fill = PAPER;
+        style.visuals.window_fill = PAPER;
+        style.visuals.extreme_bg_color = LIGHT;
+        style.visuals.faint_bg_color = SAGE;
+        style.visuals.override_text_color = Some(INK);
+        style.visuals.widgets.inactive.bg_fill = SAGE;
+        style.visuals.widgets.inactive.weak_bg_fill = SAGE;
+        style.visuals.widgets.hovered.bg_fill = Color32::from_rgb(207, 226, 218);
+        style.visuals.widgets.active.bg_fill = TEAL;
+        style.visuals.widgets.noninteractive.bg_stroke = egui::Stroke::new(1.0, HAIRLINE);
+        style.visuals.widgets.inactive.bg_stroke = egui::Stroke::new(1.0, HAIRLINE);
+        style.visuals.widgets.hovered.bg_stroke = egui::Stroke::new(1.0, TEAL);
+        style.visuals.widgets.inactive.rounding = 2.0.into();
+        style.visuals.widgets.hovered.rounding = 2.0.into();
+        style.visuals.widgets.active.rounding = 2.0.into();
+        style.visuals.selection.bg_fill = SAGE;
+        style.visuals.selection.stroke.color = TEAL;
         cc.egui_ctx.set_style(style);
         let dirs = directories::ProjectDirs::from("com", "Folio", "Folio");
         let mut startup_error = None;
@@ -1188,71 +1228,48 @@ impl Eder {
         });
     }
 
-    // Custom drawn navigation items keep icon, label and badge aligned without fonts or assets.
-    fn nav_item(ui: &mut egui::Ui, title: &str, icon: UiIcon, count: Option<usize>, active: bool,
-        indent: f32) -> bool {
+    // Editorial navigation: numeric index, no icons or decorative pills.
+    fn nav_item(ui: &mut egui::Ui, title: &str, _icon: UiIcon, count: Option<usize>, active: bool,
+        _indent: f32) -> bool {
         let width = ui.available_width().max(60.0);
-        let (rect, response) = ui.allocate_exact_size(Vec2::new(width, 43.0), egui::Sense::click());
+        let (rect, response) = ui.allocate_exact_size(Vec2::new(width, 54.0), egui::Sense::click());
         let painter = ui.painter();
         if active || response.hovered() {
-            painter.rect_filled(rect.shrink2(Vec2::new(0.0, 2.0)), 9.0,
-                if active { Color32::from_rgb(26, 78, 88) } else { Color32::from_rgb(25, 56, 73) });
+            painter.rect_filled(rect, 0.0, if active { SAGE } else { Color32::from_rgb(237, 236, 228) });
         }
-        if active {
-            let rail = egui::Rect::from_min_size(rect.min + Vec2::new(0.0, 7.0), Vec2::new(3.0, 29.0));
-            painter.rect_filled(rail, 2.0, Color32::from_rgb(45, 216, 196));
-        }
-        let color = if active { Color32::WHITE } else { Color32::from_rgb(214, 229, 237) };
-        let icon_rect = egui::Rect::from_center_size(
-            rect.left_center() + Vec2::new(25.0 + indent, 0.0),
-            Vec2::splat(20.0),
-        );
-        paint_icon(painter, icon_rect, icon, color);
-        painter.text(rect.left_center() + Vec2::new(47.0 + indent, 0.0), egui::Align2::LEFT_CENTER,
-            title, egui::FontId::proportional(14.0), color);
+        painter.line_segment([rect.left_bottom(), rect.right_bottom()], egui::Stroke::new(1.0, HAIRLINE));
+        let number = match title {
+            "Library" => "01", "Currently Reading" => "02", "Favorites" => "03",
+            "Settings" => "04", _ => "—",
+        };
+        painter.text(rect.left_center() + Vec2::new(10.0, 0.0), egui::Align2::LEFT_CENTER,
+            number, egui::FontId::proportional(10.0), if active { TEAL } else { MUTED });
+        painter.text(rect.left_center() + Vec2::new(43.0, 0.0), egui::Align2::LEFT_CENTER,
+            title, egui::FontId::proportional(14.0), INK);
         if let Some(count) = count {
-            let center = rect.right_center() - Vec2::new(21.0, 0.0);
-            let badge = egui::Rect::from_center_size(center, Vec2::new(29.0, 25.0));
-            painter.rect_filled(badge, 7.0, Color32::from_rgb(45, 85, 101));
-            painter.text(center, egui::Align2::CENTER_CENTER, count.to_string(),
-                egui::FontId::proportional(12.0), Color32::WHITE);
+            painter.text(rect.right_center() - Vec2::new(12.0, 0.0), egui::Align2::RIGHT_CENTER,
+                format!("{:02}", count), egui::FontId::proportional(11.0), MUTED);
         }
         response.on_hover_text(title).clicked()
     }
 
     fn sidebar(&mut self, ui: &mut egui::Ui) {
-        ui.add_space(20.0);
-        ui.horizontal(|ui| {
-            let (mark, _) = ui.allocate_exact_size(Vec2::new(48.0, 50.0), egui::Sense::hover());
-            let p = ui.painter();
-            p.rect_filled(egui::Rect::from_min_size(mark.min + Vec2::new(4.0, 9.0), Vec2::new(18.0, 32.0)),
-                4.0, Color32::from_rgb(49, 218, 194));
-            p.rect_filled(egui::Rect::from_min_size(mark.min + Vec2::new(25.0, 9.0), Vec2::new(18.0, 32.0)),
-                4.0, Color32::from_rgb(33, 174, 172));
-            p.line_segment([mark.min + Vec2::new(24.0, 11.0), mark.min + Vec2::new(24.0, 44.0)],
-                egui::Stroke::new(2.0_f32, Color32::from_rgb(145, 254, 232)));
-            ui.vertical(|ui| {
-                ui.label(RichText::new("Eder.").size(28.0).strong().color(Color32::WHITE));
-                ui.label(RichText::new("THE PERSONAL PDF LIBRARY").size(9.5).color(Color32::from_rgb(169, 197, 208)));
-            });
-        });
-        ui.add_space(26.0);
+        ui.add_space(25.0);
+        ui.label(RichText::new("EDER / READER").size(10.0).strong().color(TEAL));
+        ui.add_space(12.0);
+        ui.label(RichText::new("Eder.").size(43.0).strong().color(INK));
+        ui.label(RichText::new("A quieter way to read.").size(12.0).color(MUTED));
+        ui.add_space(41.0);
+        ui.label(RichText::new("YOUR WORKSPACE").size(10.0).strong().color(MUTED));
+        ui.add_space(12.0);
         let can_add = self.file_dialog.is_none();
         let button_width = ui.available_width();
         let add = ui.add_enabled_ui(can_add, |ui| {
-            icon_label_button(
-                ui,
-                UiIcon::Plus,
-                "Add PDF",
-                Vec2::new(button_width, 52.0),
-                Color32::from_rgb(25, 158, 152),
-                Color32::WHITE,
-                16.0,
-                10.0,
-            )
+            icon_label_button(ui, UiIcon::Plus, "Add document",
+                Vec2::new(button_width, 44.0), DEEP, LIGHT, 13.0, 2.0)
         }).inner;
         if add.clicked() { self.pick_pdfs(ui.ctx()); }
-        ui.add_space(20.0);
+        ui.add_space(26.0);
         let all_count = if self.view == View::Library { Some(self.document_count) } else { None };
         for (view, icon, count) in [
             (View::Library, UiIcon::Library, all_count),
@@ -1263,18 +1280,19 @@ impl Eder {
                 self.change_view(view);
             }
         }
-        ui.add_space((ui.available_height() - 100.0).max(12.0));
+        ui.add_space((ui.available_height() - 150.0).max(18.0));
         if Self::nav_item(ui, "Settings", UiIcon::Settings, None, self.view == View::Settings, 0.0) {
             self.change_view(View::Settings);
         }
-        ui.add_space(30.0);
-        ui.label(RichText::new("Your library. Your space.")
-            .italics().size(12.0).color(Color32::from_rgb(155, 190, 199)));
+        ui.add_space(22.0);
+        ui.label(RichText::new("LOCAL FIRST / NO ACCOUNT").size(10.0).strong().color(TEAL));
+        ui.add_space(4.0);
+        ui.label(RichText::new("Your documents stay yours.").size(11.0).color(MUTED));
     }
 
     fn compact_nav(&mut self, ui: &mut egui::Ui) {
         ui.horizontal_wrapped(|ui| {
-            ui.label(RichText::new("Eder.").size(20.0).strong().color(Color32::from_rgb(14, 105, 103)));
+            ui.label(RichText::new("Eder.").size(24.0).strong().color(INK));
             for view in [View::Library, View::Reading, View::Favorites, View::Settings] {
                 if ui.selectable_label(self.view == view, view.title()).clicked() {
                     self.change_view(view);
@@ -1301,9 +1319,9 @@ impl Eder {
 
     fn toolbar_search(&mut self, ui: &mut egui::Ui, width: f32) {
         egui::Frame::none()
-            .fill(Color32::WHITE)
-            .rounding(10.0)
-            .stroke(egui::Stroke::new(1.0_f32, Color32::from_rgb(227, 233, 240)))
+            .fill(LIGHT)
+            .rounding(2.0)
+            .stroke(egui::Stroke::new(1.0_f32, HAIRLINE))
             .inner_margin(egui::Margin::symmetric(10.0, 7.0))
             .show(ui, |ui| {
                 ui.horizontal(|ui| {
@@ -1329,9 +1347,9 @@ impl Eder {
     }
 
     fn view_toggle(&mut self, ui: &mut egui::Ui) {
-        let selected = Color32::from_rgb(20, 159, 151);
-        let unselected = Color32::from_rgb(239, 244, 248);
-        let dark = Color32::from_rgb(21, 48, 66);
+        let selected = DEEP;
+        let unselected = SAGE;
+        let dark = INK;
         if icon_label_button(
             ui,
             UiIcon::Grid,
@@ -1358,54 +1376,28 @@ impl Eder {
 
     fn toolbar(&mut self, ui: &mut egui::Ui) {
         let compact = ui.available_width() < 770.0;
-        let count = self.document_count;
+        ui.label(RichText::new("WORKSPACE / DOCUMENTS").size(10.0).strong().color(TEAL));
+        ui.add_space(3.0);
         ui.horizontal(|ui| {
-            ui.label(RichText::new(self.view.title()).size(28.0).strong()
-                .color(Color32::from_rgb(17, 39, 58)));
+            ui.label(RichText::new(self.view.title()).size(if compact { 31.0 } else { 40.0 })
+                .strong().color(INK));
             if self.view != View::Settings {
-                egui::Frame::none().fill(Color32::from_rgb(241, 245, 248))
-                    .rounding(7.0).inner_margin(egui::Margin::symmetric(9.0, 6.0))
-                    .show(ui, |ui| {
-                        ui.label(RichText::new(format!("{count} documents")).size(12.0)
-                            .color(Color32::from_rgb(96, 113, 133)));
-                    });
-            }
-            if !compact && self.view != View::Settings {
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if icon_label_button(
-                        ui,
-                        UiIcon::Refresh,
-                        "Refresh",
-                        Vec2::new(98.0, 39.0),
-                        ui.visuals().widgets.inactive.bg_fill,
-                        ui.visuals().text_color(),
-                        14.0,
-                        4.0,
-                    ).clicked() {
-                        self.refresh();
-                    }
-                    self.view_toggle(ui);
-                    let search_width = ui.available_width().min(340.0);
-                    self.toolbar_search(ui, search_width);
-                });
+                ui.add_space(10.0);
+                ui.label(RichText::new(format!("{:02} ITEMS", self.document_count))
+                    .size(11.0).color(MUTED));
             }
         });
-        if compact && self.view != View::Settings {
-            ui.add_space(8.0);
+        if self.view != View::Settings {
+            ui.add_space(10.0);
             ui.horizontal(|ui| {
-                let search_width = (ui.available_width() - 200.0).max(130.0);
+                let controls_width = if compact { 140.0 } else { 210.0 };
+                let search_width = (ui.available_width() - controls_width).min(400.0).max(120.0);
                 self.toolbar_search(ui, search_width);
-                self.view_toggle(ui);
-                if icon_label_button(
-                    ui,
-                    UiIcon::Refresh,
-                    "",
-                    Vec2::new(38.0, 38.0),
-                    ui.visuals().widgets.inactive.bg_fill,
-                    ui.visuals().text_color(),
-                    14.0,
-                    4.0,
-                ).on_hover_text("Refresh").clicked() { self.refresh(); }
+                if ui.available_width() > 90.0 { self.view_toggle(ui); }
+                if ui.available_width() > 38.0 && icon_label_button(
+                    ui, UiIcon::Refresh, "", Vec2::new(36.0, 36.0),
+                    SAGE, INK, 12.0, 2.0,
+                ).on_hover_text("Refresh documents").clicked() { self.refresh(); }
             });
         }
     }
@@ -1467,7 +1459,7 @@ impl Eder {
             self.load();
         }
         ui.add_space(24.0);
-        ui.heading("Your library, on your device.");
+        ui.label(RichText::new("Your library,\non your device.").size(42.0).strong().color(INK));
         ui.label("Choose the folder containing your PDFs. Subfolders stay organized as they are.");
         ui.add_space(18.0);
         ui.label(RichText::new("Library folder").strong());
@@ -1529,7 +1521,7 @@ impl Eder {
     }
     // Keep the grid responsive and virtualize rows rather than individual documents.
     fn grid_columns(width: f32) -> usize {
-        const MIN_TILE_WIDTH: f32 = 176.0;
+        const MIN_TILE_WIDTH: f32 = 195.0;
         const GAP: f32 = 14.0;
         ((width + GAP) / (MIN_TILE_WIDTH + GAP)).floor().max(1.0) as usize
     }
@@ -1562,8 +1554,9 @@ impl Eder {
                 ui.set_width(width);
                 ui.set_min_height(TILE_HEIGHT);
                 egui::Frame::none()
-                    .fill(Color32::WHITE)
-                    .rounding(12.0)
+                    .fill(LIGHT)
+                    .stroke(egui::Stroke::new(1.0, HAIRLINE))
+                    .rounding(2.0)
                     .inner_margin(PADDING)
                     .show(ui, |ui| {
                         ui.spacing_mut().item_spacing.y = 5.0;
@@ -1582,9 +1575,9 @@ impl Eder {
                             rect,
                             8.0,
                             if response.hovered() && e.available {
-                                Color32::from_rgb(232, 242, 238)
+                                Color32::from_rgb(207, 226, 218)
                             } else {
-                                Color32::from_rgb(241, 245, 244)
+                                SAGE
                             },
                         );
 
@@ -1630,7 +1623,7 @@ impl Eder {
                                 egui::Align2::CENTER_CENTER,
                                 "PDF",
                                 egui::FontId::proportional(19.0),
-                                Color32::from_rgb(31, 120, 101),
+                                TEAL,
                             );
                         }
 
@@ -1726,12 +1719,12 @@ impl Eder {
             }).is_ok() {
             self.pending.insert(e.path.clone());
         }
-        egui::Frame::none().fill(Color32::WHITE).rounding(10.0).inner_margin(8.0)
+        egui::Frame::none().fill(LIGHT).stroke(egui::Stroke::new(1.0, HAIRLINE)).rounding(2.0).inner_margin(10.0)
             .show(ui, |ui| {
                 ui.set_min_height(63.0);
                 ui.horizontal(|ui| {
                     let (rect, response) = ui.allocate_exact_size(Vec2::new(50.0, 62.0), egui::Sense::click());
-                    ui.painter().rect_filled(rect, 5.0, Color32::from_rgb(240, 245, 246));
+                    ui.painter().rect_filled(rect, 5.0, SAGE);
                     if let Some(Some(texture)) = self.textures.get(&e.path) {
                         let size = texture.size_vec2();
                         let scale = (rect.width()/size.x).min(rect.height()/size.y).min(1.0);
@@ -1739,10 +1732,10 @@ impl Eder {
                             egui::Rect::from_min_max(egui::Pos2::ZERO, egui::pos2(1.0, 1.0)), Color32::WHITE);
                     } else {
                         if e.directory {
-                            paint_icon(ui.painter(), rect.shrink(15.0), UiIcon::Folder, Color32::from_rgb(25, 142, 134));
+                            paint_icon(ui.painter(), rect.shrink(15.0), UiIcon::Folder, TEAL);
                         } else {
                             ui.painter().text(rect.center(), egui::Align2::CENTER_CENTER,
-                                "PDF", egui::FontId::proportional(15.0), Color32::from_rgb(25, 142, 134));
+                                "PDF", egui::FontId::proportional(15.0), TEAL);
                         }
                     }
                     if response.clicked() && e.available {
@@ -1757,7 +1750,7 @@ impl Eder {
                             else { self.open(e.path.clone(), false); }
                         }
                         ui.label(RichText::new(if e.directory { "FOLDER" } else { "PDF DOCUMENT" })
-                            .size(11.0).color(Color32::from_rgb(114, 131, 148)));
+                            .size(11.0).color(MUTED));
                     });
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         if !e.directory {
@@ -1795,13 +1788,13 @@ impl Eder {
     fn browser(&mut self, ui: &mut egui::Ui) {
         if self.view == View::Library && self.state.root.is_none() {
             ui.add_space(50.0);
-            ui.heading("A quiet place for your PDFs.");
+            ui.label(RichText::new("A quiet place\nfor your PDFs.").size(39.0).strong().color(INK));
             ui.label("No library folder is configured. Open Settings to choose one.");
             if ui.button("Open Settings").clicked() { self.change_view(View::Settings); }
             return;
         }
         self.breadcrumbs(ui);
-        ui.add_space(16.0);
+        ui.add_space(26.0);
         if self.loading || self.opening {
             ui.horizontal(|ui| {
                 ui.spinner();
@@ -1853,8 +1846,8 @@ impl Eder {
             return;
         }
 
-        const GAP: f32 = 14.0;
-        const ROW_HEIGHT: f32 = 280.0;
+        const GAP: f32 = 18.0;
+        const ROW_HEIGHT: f32 = 284.0;
         // Reserve scrollbar room so a column never gets clipped on compact windows.
         let available = (ui.available_width() - 18.0).max(1.0);
         let columns = Self::grid_columns(available);
@@ -1884,7 +1877,9 @@ impl Eder {
             });
     }
     fn reader_ui(&mut self, ctx: &egui::Context) {
-        egui::TopBottomPanel::top("reader_toolbar").show(ctx, |ui| {
+        egui::TopBottomPanel::top("reader_toolbar")
+            .frame(egui::Frame::none().fill(PAPER).inner_margin(egui::Margin::symmetric(20.0, 12.0)))
+            .show(ctx, |ui| {
             ui.horizontal_wrapped(|ui| {
                 if icon_label_button(
                     ui,
@@ -1983,7 +1978,7 @@ impl Eder {
                     .fill(if self.state.dark {
                         Color32::from_rgb(24, 27, 31)
                     } else {
-                        Color32::from_rgb(218, 223, 226)
+                        SAGE
                     })
                     .inner_margin(18.0),
             )
@@ -2241,23 +2236,23 @@ impl eframe::App for Eder {
         }
         if ctx.screen_rect().width() > 820.0 {
             egui::SidePanel::left("sidebar")
-                .exact_width(254.0)
-                .frame(egui::Frame::none().fill(Color32::from_rgb(11, 37, 54))
-                    .inner_margin(egui::Margin::symmetric(18.0, 8.0)))
+                .exact_width(265.0)
+                .frame(egui::Frame::none().fill(PAPER)
+                    .inner_margin(egui::Margin::symmetric(23.0, 8.0)))
                 .show(ctx, |ui| self.sidebar(ui));
         } else {
             egui::TopBottomPanel::top("compact_navigation")
                 .show(ctx, |ui| self.compact_nav(ui));
         }
         let available = ctx.available_rect().width();
-        let header_height = if available < 770.0 && self.view != View::Settings { 120.0 } else { 76.0 };
+        let header_height = if self.view == View::Settings { 103.0 } else if available < 770.0 { 157.0 } else { 151.0 };
         egui::TopBottomPanel::top("library_toolbar")
             .exact_height(header_height)
-            .frame(egui::Frame::none().fill(Color32::WHITE).inner_margin(16.0))
+            .frame(egui::Frame::none().fill(PAPER).inner_margin(egui::Margin::symmetric(27.0, 13.0)))
             .show(ctx, |ui| self.toolbar(ui));
         egui::CentralPanel::default()
-            .frame(egui::Frame::none().fill(Color32::from_rgb(248, 250, 252))
-                .inner_margin(egui::Margin::symmetric(22.0, 20.0)))
+            .frame(egui::Frame::none().fill(PAPER)
+                .inner_margin(egui::Margin::symmetric(27.0, 20.0)))
             .show(ctx, |ui| {
                 if self.view == View::Settings {
                     egui::ScrollArea::vertical().show(ui, |ui| self.settings(ui));
