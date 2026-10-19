@@ -72,6 +72,18 @@ const HAIRLINE: Color32 = Color32::from_rgb(204, 212, 207);
 const PAGE_CACHE_BUDGET: usize = 160 * 1024 * 1024;
 const POSITION_SAVE_DELAY: Duration = Duration::from_millis(650);
 
+fn load_logo(ctx: &egui::Context) -> TextureHandle {
+    let logo = image::load_from_memory(include_bytes!("../eder-landing/assets/eder-mark.png"))
+        .expect("embedded Eder logo must be a valid PNG")
+        .to_rgba8();
+    let (width, height) = logo.dimensions();
+    ctx.load_texture(
+        "eder-logo",
+        egui::ColorImage::from_rgba_unmultiplied([width as usize, height as usize], logo.as_raw()),
+        egui::TextureOptions::LINEAR,
+    )
+}
+
 #[derive(Clone, Copy)]
 enum UiIcon {
     Library,
@@ -372,6 +384,7 @@ pub struct Eder {
     page_gen: Arc<AtomicU64>,
     thumb_gen: Arc<AtomicU64>,
     open_gen: Arc<AtomicU64>,
+    logo: TextureHandle,
     state: Snapshot,
     favorite_set: HashSet<PathBuf>,
     view: View,
@@ -619,6 +632,7 @@ impl Eder {
         style.visuals.selection.bg_fill = SAGE;
         style.visuals.selection.stroke.color = TEAL;
         cc.egui_ctx.set_style(style);
+        let logo = load_logo(&cc.egui_ctx);
         let dirs = directories::ProjectDirs::from("com", "Folio", "Folio");
         let mut startup_error = None;
         let data = dirs.as_ref().map(|d| d.data_local_dir().to_path_buf());
@@ -784,6 +798,7 @@ impl Eder {
             page_gen,
             thumb_gen,
             open_gen,
+            logo,
             state: Snapshot::default(),
             favorite_set: HashSet::new(),
             view: View::Library,
@@ -1438,14 +1453,18 @@ impl Eder {
 
     fn sidebar(&mut self, ui: &mut egui::Ui) {
         ui.add_space(25.0);
-        ui.label(
-            RichText::new("EDER / READER")
-                .size(10.0)
-                .strong()
-                .color(TEAL),
-        );
-        ui.add_space(12.0);
-        ui.label(RichText::new("Eder.").size(43.0).strong().color(INK));
+        ui.horizontal(|ui| {
+            ui.spacing_mut().item_spacing.x = 0.0;
+            ui.image((self.logo.id(), Vec2::splat(42.0)));
+            ui.add_space(8.0);
+            ui.label(RichText::new("Eder").size(43.0).strong().color(INK));
+            ui.label(
+                RichText::new(".")
+                    .size(43.0)
+                    .strong()
+                    .color(Color32::from_rgb(240, 128, 60)),
+            );
+        });
         ui.label(
             RichText::new("A quieter way to read.")
                 .size(12.0)
@@ -1510,7 +1529,16 @@ impl Eder {
 
     fn compact_nav(&mut self, ui: &mut egui::Ui) {
         ui.horizontal_wrapped(|ui| {
-            ui.label(RichText::new("Eder.").size(24.0).strong().color(INK));
+            ui.spacing_mut().item_spacing.x = 0.0;
+            ui.image((self.logo.id(), Vec2::splat(26.0)));
+            ui.add_space(4.0);
+            ui.label(RichText::new("Eder").size(24.0).strong().color(INK));
+            ui.label(
+                RichText::new(".")
+                    .size(24.0)
+                    .strong()
+                    .color(Color32::from_rgb(240, 128, 60)),
+            );
             for view in [
                 View::Library,
                 View::Reading,
@@ -2749,6 +2777,7 @@ mod tests {
             page_gen: Arc::new(AtomicU64::new(0)),
             thumb_gen: Arc::new(AtomicU64::new(0)),
             open_gen: Arc::new(AtomicU64::new(0)),
+            logo: load_logo(&ctx),
             state: Snapshot {
                 root: Some(root.clone()),
                 ..Default::default()

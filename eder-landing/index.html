@@ -11,6 +11,7 @@
     <meta property="og:description" content="Native Rust PDF library and reader. Local by design.">
     <meta property="og:image" content="assets/eder-banner.png">
     <title>Eder — A quieter place for your PDFs</title>
+    <link rel="icon" type="image/svg+xml" href="assets/eder-mark.svg">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link
@@ -88,29 +89,22 @@
 
         .brand-logo {
             display: inline-flex;
-            gap: 3px;
-            position: relative
+            flex: 0 0 auto
         }
 
-        .brand-logo i {
-            height: 31px;
-            width: 17px;
-            border-radius: 4px;
-            background: #21cabb;
-            display: block
+        .brand-logo img {
+            display: block;
+            width: 36px;
+            height: 36px
         }
 
-        .brand-logo i+i {
-            background: #169d9a
+        .brand-dot {
+            color: #f0803c
         }
 
-        .brand-logo:after {
-            content: '';
-            position: absolute;
-            left: 17px;
-            top: 3px;
-            height: 29px;
-            border-left: 2px solid var(--paper)
+        .foot .brand-logo img {
+            width: 32px;
+            height: 32px
         }
 
         .nav {
@@ -874,7 +868,8 @@
 <body>
     <header class="topbar">
         <div class="container topbar-inner"><a href="#home" class="brand" aria-label="Eder home"><span
-                    class="brand-logo" aria-hidden="true"><i></i><i></i></span>Eder.</a>
+                    class="brand-logo" aria-hidden="true"><img src="assets/eder-mark.svg" alt=""></span><span>Eder<span
+                    class="brand-dot">.</span></span></a>
             <nav class="nav" id="nav"><a href="#home"><span>01</span>Home</a><a
                     href="#features"><span>02</span>Features</a><a href="#the-app"><span>03</span>The app</a><a
                     href="#principles"><span>04</span>Principles</a></nav><a class="nav-cta" href="#get-eder">Get Eder
@@ -1032,7 +1027,8 @@
         <div class="container">
             <div class="foot-inner">
                 <div><a href="#home" class="brand"><span class="brand-logo"
-                            aria-hidden="true"><i></i><i></i></span>Eder.</a>
+                            aria-hidden="true"><img src="assets/eder-mark.svg" alt=""></span><span>Eder<span
+                            class="brand-dot">.</span></span></a>
                     <p>A quieter place for your PDFs. © <span id="year"></span></p>
                 </div>
                 <div class="foot-links"><a href="#home">Home</a><a href="#features">Features</a><a href="#get-eder">Get
