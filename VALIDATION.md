@@ -1,5 +1,7 @@
 # Validation — 16 October 2026
 
+Historical delivery baseline. For the subsequent architecture refactor, current checks and limitations, see [architecture validation](docs/architecture-validation.md).
+
 Environment: Linux x86-64, Ubuntu 24.04, Rust 1.99.1. Dependencies pinned by Cargo.lock. These results are for this build environment, not performance guarantees for other computers or documents.
 
 ## Checks completed

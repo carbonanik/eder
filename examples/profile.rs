@@ -29,6 +29,25 @@ fn main() {
     let pages = render::page_count(&fixture, &gen, 0).unwrap();
     println!("PDF metadata: {:?} ({} pages)", start.elapsed(), pages);
     let start = Instant::now();
+    let geometry = render::page_geometry(&fixture, pages, &gen, 0).unwrap();
+    println!(
+        "PDF page geometry: {:?} ({} pages)",
+        start.elapsed(),
+        geometry.len()
+    );
+    let sizes: Vec<_> = (0..20_000)
+        .map(|index| geometry[index % geometry.len()])
+        .collect();
+    let start = Instant::now();
+    let layout = eder::app::reader::layout::PageLayout::new(&sizes, 800.0, 1.0, 28.0);
+    println!("20,000-page layout preparation: {:?}", start.elapsed());
+    let start = Instant::now();
+    for index in 0..100_000 {
+        let y = (index % 20_000) as f32 * 300.0;
+        std::hint::black_box(layout.visible(y, y + 900.0));
+    }
+    println!("100,000 viewport range lookups: {:?}", start.elapsed());
+    let start = Instant::now();
     let _ = render::raster(&fixture, 1, render::THUMB_EDGE, cache.path(), &gen, 0).unwrap();
     println!("Cold thumbnail: {:?}", start.elapsed());
     let start = Instant::now();

@@ -1,1 +1,0 @@
-APPIMAGETOOL=/tmp/appimagetool-x86_64.AppImage ./packaging/appimage/build.sh

@@ -1,3 +1,11 @@
+pub mod app;
+pub mod desktop;
+pub mod domain;
+pub mod infrastructure;
 pub mod library;
+pub mod policy;
 pub mod render;
+pub mod runtime;
+pub mod services;
 pub mod store;
+mod ui;

@@ -1,5 +1,5 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
-mod app;
+
 fn main() -> eframe::Result {
     let logo = image::load_from_memory(include_bytes!("../eder-landing/assets/eder-mark.png"))
         .expect("embedded Eder logo must be a valid PNG")
@@ -19,6 +19,6 @@ fn main() -> eframe::Result {
     eframe::run_native(
         "Eder — PDF Library",
         options,
-        Box::new(|cc| Ok(Box::new(app::Eder::new(cc)))),
+        Box::new(|cc| Ok(Box::new(eder::desktop::Eder::new(cc)))),
     )
 }
