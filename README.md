@@ -36,6 +36,14 @@ Install the Linux build dependencies above and `appimagetool`, then run:
 
 The AppImage is written to `target/appimage/`. Poppler and the host's desktop graphics libraries remain runtime dependencies; Poppler is not bundled.
 
+Pushes to `master` and manual runs of the **Release AppImage** GitHub Actions
+workflow check the package version in `Cargo.toml`. If a release for `v<version>`
+already exists, the workflow skips the build. Otherwise, it builds a Linux x86-64
+AppImage and publishes it in a GitHub release with generated notes, creating the
+version tag at the triggering commit. To publish a new version, update the
+package version in `Cargo.toml` and `Cargo.lock`, then push to `master`.
+The workflow uses the built-in `GITHUB_TOKEN`; no extra secret is required.
+
 macOS: install Xcode command-line tools, Rust, and Poppler (`brew install poppler`), then `cargo run --locked --release`.
 
 Windows: install Rust's MSVC toolchain and Visual Studio C++ build tools. Install a trusted Poppler build and put its `bin` directory on PATH, or set `EDER_POPPLER_DIR` to that directory (`FOLIO_POPPLER_DIR` remains supported for compatibility). Run `cargo build --locked --release`; the program is `target\release\eder.exe`.
