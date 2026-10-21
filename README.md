@@ -42,6 +42,21 @@ Windows: install Rust's MSVC toolchain and Visual Studio C++ build tools. Instal
 
 The Rust source uses cross-platform APIs. Only Linux compilation and headless tests were performed here; Windows/macOS packages and native desktop interaction are not yet validated. This is a desktop application, not an Android/iOS build. Compact desktop windows are supported.
 
+## Linux desktop installation and Flathub preparation
+
+After building, install the executable, desktop entry, icon, metadata, and license
+notices into a staging directory:
+
+```sh
+DESTDIR="$PWD/target/linux-stage" PREFIX=/usr sh packaging/linux/install.sh
+sh packaging/linux/validate.sh
+```
+
+The desktop application ID is `io.github.carbonanik.eder`. See
+[Flathub readiness](docs/flathub-readiness.md) for remaining release, packaging,
+sandbox testing, and disclosure work. This repository does not yet contain a
+Flathub manifest or a tested Flatpak build.
+
 ## Features
 
 - Immediate folders and PDFs only; case-insensitive extensions and name sorting, folders first.

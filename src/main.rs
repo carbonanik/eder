@@ -7,6 +7,7 @@ fn main() -> eframe::Result {
     let (width, height) = logo.dimensions();
     let options = eframe::NativeOptions {
         viewport: eframe::egui::ViewportBuilder::default()
+            .with_app_id("io.github.carbonanik.eder")
             .with_inner_size([1100.0, 760.0])
             .with_min_inner_size([360.0, 420.0])
             .with_icon(std::sync::Arc::new(eframe::egui::IconData {

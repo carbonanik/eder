@@ -14,3 +14,9 @@ jobs:
       - run: cargo clippy --locked --all-targets -- -D warnings
       - run: cargo test --locked -- --include-ignored
       - run: cargo build --locked --release
+  desktop-metadata:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: sudo apt-get update && sudo apt-get install -y appstream desktop-file-utils
+      - run: sh packaging/linux/validate.sh

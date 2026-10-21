@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Copyright 2026 Eder contributors -->
+<component type="desktop-application">
+  <id>io.github.carbonanik.eder</id>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>MIT</project_license>
+  <name>Eder</name>
+  <summary>Browse and read your local PDF library</summary>
+  <developer id="io.github.carbonanik">
+    <name>Eder contributors</name>
+  </developer>
+  <description>
+    <p>Eder keeps your PDF library on your computer. Choose a folder, browse its
+    documents and subfolders, and open a PDF to start reading. Your library and
+    reading progress stay local, without an account or document uploads.</p>
+    <ul>
+      <li>Find documents with cover previews and filename search.</li>
+      <li>Keep favorites and recently opened documents close at hand.</li>
+      <li>Read one page at a time or scroll continuously.</li>
+      <li>Adjust zoom, fit pages to the window, and invert page colors.</li>
+      <li>Resume reading with saved positions for each document.</li>
+    </ul>
+    <p>Text selection, annotations, printing, and password entry are not supported.</p>
+  </description>
+  <launchable type="desktop-id">io.github.carbonanik.eder.desktop</launchable>
+  <url type="homepage">https://carbonanik.github.io/eder/</url>
+  <url type="bugtracker">https://github.com/carbonanik/eder/issues</url>
+  <url type="vcs-browser">https://github.com/carbonanik/eder</url>
+  <screenshots>
+    <screenshot type="default">
+      <image>https://raw.githubusercontent.com/carbonanik/eder/132fa634b47173b22e4de1242e23285e2943bf32/eder-landing/assets/eder-app.png</image>
+      <caption>Browse favorite PDFs with cover previews</caption>
+    </screenshot>
+  </screenshots>
+  <content_rating type="oars-1.1" />
+  <supports>
+    <control>keyboard</control>
+    <control>pointing</control>
+  </supports>
+  <releases>
+    <release version="0.1.0" date="2026-10-18">
+      <url type="details">https://github.com/carbonanik/eder/releases/tag/v0.1.0</url>
+    </release>
+  </releases>
+</component>

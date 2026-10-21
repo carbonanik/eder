@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=Eder
+GenericName=PDF Library
+Comment=Browse and read a local PDF library
+Exec=eder
+Icon=io.github.carbonanik.eder
+Terminal=false
+Categories=Office;Viewer;
+Keywords=PDF;Reader;Library;Books;Documents;
+StartupWMClass=io.github.carbonanik.eder
