@@ -6,11 +6,11 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="theme-color" content="#f4f1e9">
     <meta name="description"
-        content="Eder is a native Rust PDF library for people who want a quiet, local place to read. No accounts, no uploads, no noise.">
-    <meta property="og:title" content="Eder — A quieter place for your PDFs">
-    <meta property="og:description" content="Native Rust PDF library and reader. Local by design.">
+        content="Eder is a desktop PDF reader and personal bookshelf. Browse books in your existing folders and pick up where you left off.">
+    <meta property="og:title" content="Eder — Your personal bookshelf, on your desktop">
+    <meta property="og:description" content="A quieter way to read. Your local PDF books, familiar folders, and saved reading progress in one desktop app.">
     <meta property="og:image" content="assets/eder-banner.png">
-    <title>Eder — A quieter place for your PDFs</title>
+    <title>Eder — Your personal bookshelf, on your desktop</title>
     <link rel="icon" type="image/svg+xml" href="assets/eder-mark.svg">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -201,6 +201,12 @@
             line-height: .98;
             font-weight: 800;
             margin: 42px 0 30px
+        }
+
+        .hero h1 {
+            font-size: clamp(43px, 4.6vw, 76px);
+            letter-spacing: -.075em;
+            line-height: 1.12;
         }
 
         h1 em {
@@ -742,7 +748,7 @@
             }
 
             h1 {
-                font-size: clamp(64px, 16vw, 105px);
+                font-size: clamp(43px, 10vw, 68px);
                 margin: 28px 0
             }
 
@@ -851,6 +857,10 @@
             }
         }
 
+        @media(max-width:700px) {
+            .hero h1 { font-size: clamp(40px, 9vw, 68px); }
+        }
+
         @media(prefers-reduced-motion:reduce) {
             html {
                 scroll-behavior: auto
@@ -880,13 +890,12 @@
     <main>
         <section class="hero" id="home">
             <div class="hero-left">
-                <div class="kicker">A personal PDF library</div>
-                <h1>Read.<br>Keep.<br><em>Return.</em></h1>
-                <p class="hero-subtitle">A quieter place for everything worth reading.</p>
-                <p class="hero-body">Meet Eder. A native desktop PDF library designed around one simple idea: your
-                    documents should belong to you, and reading them should feel effortless.</p><a href="#the-app"
+                <div class="kicker">Your books, your space</div>
+                <h1>Your personal<br>bookshelf,<br><em>on your desktop.</em></h1>
+                <p class="hero-subtitle">A quieter way to read.</p>
+                <p class="hero-body">Eder is a desktop PDF reader designed for people who love collecting and reading books. Browse your existing folders, keep your collection organized, and pick up right where you left off — all without moving your books or uploading them anywhere.</p><a href="#the-app"
                     class="text-link">Explore Eder <span>↗</span></a>
-                <div class="hero-foot">Independent software · Built in Rust</div>
+                <div class="hero-foot">Local books · Familiar folders · Reading progress</div>
             </div>
             <div class="hero-right">
                 <div class="app-frame"><img src="assets/eder-app.png" alt="Actual Eder desktop PDF library interface"
@@ -894,50 +903,43 @@
             </div>
         </section>
         <div class="marquee">
-            <div class="container marquee-inner"><span><b>◆</b>Local-first</span><span><b>◆</b>Native
-                    Rust</span><span><b>◆</b>No account</span><span><b>◆</b>No uploads</span></div>
+            <div class="container marquee-inner"><span><b>◆</b>Your own books</span><span><b>◆</b>Existing folders</span><span><b>◆</b>Saved progress</span><span><b>◆</b>Local reading</span></div>
         </div>
         <section class="section" id="features">
             <div class="container">
                 <div class="section-header fade">
                     <div>
                         <div class="kicker">01 / What matters</div>
-                        <h2>Everything you need.<br>Nothing in the way.</h2>
+                        <h2>Your books.<br>Ready to read.</h2>
                     </div>
-                    <p class="section-intro">The best library is the one that disappears when you start reading.
-                        <strong>Eder stays focused on the essentials</strong> — from finding a document to picking up
-                        where you left off.</p>
+                    <p class="section-intro">Your collection is already on your computer. <strong>Eder gives it a familiar place to browse and read</strong> — with the folders you know and your reading progress saved.</p>
                 </div>
                 <div class="features">
                     <article class="feature-row fade"><span class="feature-no">01 / 06</span>
-                        <h3>Your folders, your structure.</h3>
-                        <p>Browse PDFs where they already live. Move through directories without importing or uploading
-                            anything.</p><span class="feature-arrow">↗</span>
+                        <h3>Keep your folders.</h3>
+                        <p>Choose a folder and browse your books and subfolders just as you organized them on your computer.</p><span class="feature-arrow">↗</span>
                     </article>
                     <article class="feature-row fade"><span class="feature-no">02 / 06</span>
-                        <h3>Recognize at a glance.</h3>
-                        <p>First-page previews help you find documents visually, with disk caching to speed up return
-                            visits.</p><span class="feature-arrow">↗</span>
+                        <h3>Find books by cover.</h3>
+                        <p>Recognize books by their first-page previews instead of searching through filenames alone.</p><span class="feature-arrow">↗</span>
                     </article>
                     <article class="feature-row fade"><span class="feature-no">03 / 06</span>
-                        <h3>Continue your story.</h3>
-                        <p>Recently opened documents and saved reading positions make it easy to return to what matters.
-                        </p><span class="feature-arrow">↗</span>
+                        <h3>Pick up where you left off.</h3>
+                        <p>Your reading progress is saved, so you can return to a book without finding your page again.</p><span class="feature-arrow">↗</span>
                     </article>
                     <article class="feature-row fade"><span class="feature-no">04 / 06</span>
-                        <h3>Make it a favorite.</h3>
-                        <p>Keep important PDFs just one click away in a dedicated favorites collection.</p><span
+                        <h3>Keep favorites close.</h3>
+                        <p>Put the books you want to revisit in your favorites for easy access.</p><span
                             class="feature-arrow">↗</span>
                     </article>
                     <article class="feature-row fade"><span class="feature-no">05 / 06</span>
-                        <h3>Read on your terms.</h3>
-                        <p>Single-page or continuous scrolling, zoom, page jumps, and keyboard navigation.</p><span
+                        <h3>Read comfortably.</h3>
+                        <p>Zoom in when you need to, scroll through pages, and read at your own pace.</p><span
                             class="feature-arrow">↗</span>
                     </article>
                     <article class="feature-row fade"><span class="feature-no">06 / 06</span>
-                        <h3>Stay comfortably focused.</h3>
-                        <p>Dark-page inversion, compact-window support, and an interface that puts your reading first.
-                        </p><span class="feature-arrow">↗</span>
+                        <h3>Make reading the focus.</h3>
+                        <p>A dedicated desktop space for your PDF books, separate from browser tabs and everyday distractions.</p><span class="feature-arrow">↗</span>
                     </article>
                 </div>
             </div>
@@ -947,10 +949,9 @@
                 <div class="section-header fade">
                     <div>
                         <div class="kicker">02 / Inside Eder</div>
-                        <h2>A library that feels like yours.</h2>
+                        <h2>Your shelves, just as you know them.</h2>
                     </div>
-                    <p class="section-intro">Real books. Real documents. A familiar, lightweight workspace. <strong>No
-                            browser tab required.</strong></p>
+                    <p class="section-intro">Browse the folder structure you already use. Find a book, open it, and continue reading. <strong>Your collection stays on your computer.</strong></p>
                 </div>
                 <div class="showcase-image fade"><img src="assets/eder-app.png" loading="lazy"
                         alt="Eder desktop interface showing PDF cover previews, folder breadcrumbs, library sidebar and search">
@@ -962,17 +963,16 @@
         <section class="manifesto" id="principles">
             <div class="statement fade">
                 <div class="kicker">03 / Our philosophy</div>
-                <h2>Private.<br>Personal.<br><em>Yours.</em></h2>
-                <p>Your reading life doesn't need a cloud account. Eder keeps your documents on your device, opens
-                    source PDFs read-only, and stores library preferences and reading progress locally.</p><a
+                <h2>Your books.<br>Your folders.<br><em>Your space.</em></h2>
+                <p>Your bookshelf starts with the PDF books already on your computer. Eder follows your folder organization and keeps your reading progress locally, so you can focus on reading instead of managing files.</p><a
                     href="#get-eder" class="text-link">Start your library <span>↗</span></a>
             </div>
             <div class="manifesto-aside">
-                <div class="truth">No accounts <span>01</span></div>
-                <div class="truth">No document uploads <span>02</span></div>
-                <div class="truth">No telemetry <span>03</span></div>
-                <div class="truth">Read-only source documents <span>04</span></div>
-                <div class="truth">Local SQLite persistence <span>05</span></div>
+                <div class="truth">Browse your existing folders <span>01</span></div>
+                <div class="truth">Keep books on your computer <span>02</span></div>
+                <div class="truth">Refresh your library when needed <span>03</span></div>
+                <div class="truth">Zoom and scroll through PDFs <span>04</span></div>
+                <div class="truth">Return to your saved page <span>05</span></div>
             </div>
         </section>
         <section class="section architecture" id="technology">
@@ -980,10 +980,9 @@
                 <div class="section-header fade">
                     <div>
                         <div class="kicker">04 / Under the hood</div>
-                        <h2>Built with purpose.</h2>
+                        <h2>Made for the desktop.</h2>
                     </div>
-                    <p class="section-intro">A native desktop application using familiar, proven technologies — not a
-                        webview dressed up as an app.</p>
+                    <p class="section-intro">Eder began with a simple goal: a comfortable way to read a personal ebook collection on Linux. Under the hood, it uses Rust and desktop-focused tools.</p>
                 </div>
                 <div class="architecture-grid fade">
                     <div class="tech"><span>01 — CORE</span>
@@ -1009,9 +1008,8 @@
             <div class="container final-grid">
                 <div>
                     <div class="kicker">05 / Begin reading</div>
-                    <h2>Your library.<br>Your space.</h2>
-                    <p>Download Eder 0.1.0 for Linux (x86-64) as an AppImage, or visit the GitHub repository for the
-                        source code and release details.</p>
+                    <h2>Make room<br>for your books.</h2>
+                    <p>Bring your PDF collection into one familiar reading space. Download Eder 0.1.0 for Linux (x86-64), or visit GitHub for source code and release details.</p>
                 </div>
                 <div class="final-links">
                     <a class="download-link"
@@ -1029,7 +1027,7 @@
                 <div><a href="#home" class="brand"><span class="brand-logo"
                             aria-hidden="true"><img src="assets/eder-mark.svg" alt=""></span><span>Eder<span
                             class="brand-dot">.</span></span></a>
-                    <p>A quieter place for your PDFs. © <span id="year"></span></p>
+                    <p>Your personal bookshelf, on your desktop. © <span id="year"></span></p>
                 </div>
                 <div class="foot-links"><a href="#home">Home</a><a href="#features">Features</a><a href="#get-eder">Get
                         Eder</a></div>
