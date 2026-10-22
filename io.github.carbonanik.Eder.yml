@@ -18,6 +18,24 @@ finish-args:
   - --filesystem=home:ro
 
 modules:
+  - name: poppler
+    buildsystem: cmake-ninja
+    config-opts:
+      - -DCMAKE_INSTALL_LIBDIR=lib
+      - -DENABLE_UTILS=ON
+      - -DENABLE_QT5=OFF
+      - -DENABLE_QT6=OFF
+      - -DENABLE_GLIB=OFF
+      - -DENABLE_CPP=OFF
+      - -DENABLE_BOOST=OFF
+      - -DENABLE_GPGME=OFF
+      - -DBUILD_MANUAL_TESTS=OFF
+    sources:
+      - type: archive
+        url: https://poppler.freedesktop.org/poppler-26.10.0.tar.xz
+        sha256: 6792cb7c69205007ad87d2e936cecc5b3a31fac29ab54ffc3175fdb6b2a6ce35
+
+
   - name: eder
     buildsystem: simple
 
