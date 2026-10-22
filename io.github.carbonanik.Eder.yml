@@ -1,0 +1,45 @@
+
+app-id: io.github.carbonanik.Eder
+
+runtime: org.freedesktop.Platform
+runtime-version: "25.08"
+sdk: org.freedesktop.Sdk
+
+sdk-extensions:
+  - org.freedesktop.Sdk.Extension.rust-stable
+
+command: eder
+
+finish-args:
+  - --share=ipc
+  - --socket=wayland
+  - --socket=fallback-x11
+  - --device=dri
+  - --filesystem=home:ro
+
+modules:
+  - name: eder
+    buildsystem: simple
+
+    build-options:
+      append-path: /usr/lib/sdk/rust-stable/bin
+      env:
+        CARGO_HOME: /run/build/eder/cargo
+        CARGO_NET_OFFLINE: "true"
+
+    build-commands:
+      - install -Dm0644 cargo/config .cargo/config.toml
+      - cargo build --offline --release --locked
+      - install -Dm0755 target/release/eder /app/bin/eder
+      - install -Dm0644 packaging/appimage/eder.svg /app/share/icons/hicolor/scalable/apps/${FLATPAK_ID}.svg
+
+    sources:
+      - type: dir
+        path: .
+        skip:
+          - target
+          - .git
+          - .flatpak-builder
+          - builddir
+          - repo
+      - cargo-sources.json

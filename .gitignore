@@ -2,3 +2,11 @@
 *.sqlite3*
 .DS_Store
 /bin/
+
+# Flatpak generated files
+/repo/
+/builddir/
+/.flatpak-builder/
+
+# Flatpak bundles
+/*.flatpak
