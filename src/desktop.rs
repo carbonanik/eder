@@ -5,7 +5,9 @@ use crate::{
     runtime::RuntimeClient,
     ui::{textures::CachedPage, theme::*},
 };
-use eframe::egui::{self, Color32, RichText, Vec2};
+#[cfg(test)]
+use eframe::egui::Color32;
+use eframe::egui::{self, RichText, Vec2};
 use std::{
     path::PathBuf,
     sync::{atomic::Ordering, mpsc, Arc},
@@ -19,7 +21,7 @@ pub struct Eder {
 
 impl Eder {
     pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
-        crate::ui::theme::configure(&cc.egui_ctx);
+        crate::ui::theme::configure(&cc.egui_ctx, false);
         let logo = load_logo(&cc.egui_ctx);
         let runtime = RuntimeClient::start(
             crate::infrastructure::platform::AppPaths::discover(),
@@ -65,6 +67,9 @@ fn color_image(image: crate::domain::pixels::Pixels) -> egui::ColorImage {
 impl eframe::App for Eder {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         self.poll(ctx);
+        if ctx.style().visuals.dark_mode != self.app.state.dark_theme {
+            crate::ui::theme::configure(ctx, self.app.state.dark_theme);
+        }
         if ctx.input(|i| i.viewport().close_requested())
             && self.app.lifecycle != crate::app::state::Lifecycle::Closed
             && self.app.lifecycle != crate::app::state::Lifecycle::Failed
@@ -108,9 +113,9 @@ impl eframe::App for Eder {
                 ui.horizontal_wrapped(|ui| {
                     if let Some((message, error)) = &self.app.message {
                         ui.label(RichText::new(message).color(if *error {
-                            Color32::DARK_RED
+                            palette(&ctx.style().visuals).error
                         } else {
-                            Color32::from_rgb(20, 100, 80)
+                            palette(&ctx.style().visuals).success
                         }));
                         if ui.small_button("Dismiss").clicked() {
                             self.app.message = None;
@@ -135,7 +140,7 @@ impl eframe::App for Eder {
                 .exact_width(265.0)
                 .frame(
                     egui::Frame::none()
-                        .fill(PAPER)
+                        .fill(palette(&ctx.style().visuals).paper)
                         .inner_margin(egui::Margin::symmetric(23.0, 8.0)),
                 )
                 .show(ctx, |ui| self.sidebar(ui));
@@ -154,14 +159,14 @@ impl eframe::App for Eder {
             .exact_height(header_height)
             .frame(
                 egui::Frame::none()
-                    .fill(PAPER)
+                    .fill(palette(&ctx.style().visuals).paper)
                     .inner_margin(egui::Margin::symmetric(27.0, 13.0)),
             )
             .show(ctx, |ui| self.toolbar(ui));
         egui::CentralPanel::default()
             .frame(
                 egui::Frame::none()
-                    .fill(PAPER)
+                    .fill(palette(&ctx.style().visuals).paper)
                     .inner_margin(egui::Margin::symmetric(27.0, 20.0)),
             )
             .show(ctx, |ui| {

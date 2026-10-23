@@ -61,6 +61,9 @@ impl Store {
         std::fs::read_dir(&p).map_err(|e| e.to_string())?;
         self.set("root", &encode(&p))
     }
+    pub fn dark_theme(&self, value: bool) -> Result<(), String> {
+        self.set("dark_theme", &[u8::from(value)])
+    }
     pub fn dark(&self, dark: bool) -> Result<(), String> {
         self.set("dark", &[u8::from(dark)])
     }
@@ -157,6 +160,7 @@ impl Store {
         };
         Ok(Snapshot {
             root: self.setting("root")?.map(decode),
+            dark_theme: self.setting("dark_theme")? == Some(vec![1]),
             dark: self.setting("dark")? == Some(vec![1]),
             continuous_scroll: self.setting("continuous_scroll")? == Some(vec![1]),
             favorites: paths("SELECT path FROM docs WHERE favorite=1")?,
@@ -189,6 +193,9 @@ impl crate::services::ports::LibraryRepository for Store {
     }
     fn save_reading_position(&self, path: &Path, position: ReadingPosition) -> Result<(), String> {
         Store::save_reading_position(self, path, position)
+    }
+    fn dark_theme(&self, value: bool) -> Result<(), String> {
+        Store::dark_theme(self, value)
     }
     fn dark(&self, value: bool) -> Result<(), String> {
         Store::dark(self, value)
@@ -271,6 +278,29 @@ mod tests {
             store.reading_position(&pdf).unwrap(),
             ReadingPosition::new(9, 0.0)
         );
+    }
+
+    #[test]
+    fn theme_defaults_to_light_and_persists_independently_of_dark_pages() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = dir.path().join("theme.db");
+        {
+            let store = Store::open(&db).unwrap();
+            assert!(!store.snapshot().unwrap().dark_theme);
+            store.dark(true).unwrap();
+            assert!(!store.snapshot().unwrap().dark_theme);
+            store.dark_theme(true).unwrap();
+        }
+        {
+            let store = Store::open(&db).unwrap();
+            let snapshot = store.snapshot().unwrap();
+            assert!(snapshot.dark_theme);
+            assert!(snapshot.dark);
+            store.dark_theme(false).unwrap();
+        }
+        let snapshot = Store::open(&db).unwrap().snapshot().unwrap();
+        assert!(!snapshot.dark_theme);
+        assert!(snapshot.dark);
     }
 
     #[test]

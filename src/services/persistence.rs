@@ -36,6 +36,9 @@ impl<R: LibraryRepository> PersistenceService<R> {
     ) -> Result<(), String> {
         self.repository.save_reading_position(path, position)
     }
+    pub fn dark_theme(&self, value: bool) -> Result<(), String> {
+        self.repository.dark_theme(value)
+    }
     pub fn dark(&self, value: bool) -> Result<(), String> {
         self.repository.dark(value)
     }

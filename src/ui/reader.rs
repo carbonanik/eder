@@ -12,7 +12,7 @@ impl Eder {
         egui::TopBottomPanel::top("reader_toolbar")
             .frame(
                 egui::Frame::none()
-                    .fill(PAPER)
+                    .fill(palette(&ctx.style().visuals).paper)
                     .inner_margin(egui::Margin::symmetric(20.0, 12.0)),
             )
             .show(ctx, |ui| {
@@ -131,7 +131,7 @@ impl Eder {
                     .fill(if self.app.state.dark {
                         Color32::from_rgb(24, 27, 31)
                     } else {
-                        SAGE
+                        palette(&ctx.style().visuals).sage
                     })
                     .inner_margin(18.0),
             )
@@ -288,7 +288,7 @@ impl Eder {
                     egui::Align2::CENTER_CENTER,
                     format!("Page {page}"),
                     egui::FontId::proportional(12.0),
-                    MUTED,
+                    palette(ui.visuals()).muted,
                 );
             }
         });

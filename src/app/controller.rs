@@ -162,6 +162,7 @@ impl Controller {
                     effects.push(Transition::Render);
                 }
             }
+            Event::DarkTheme(dark) => self.state.dark_theme = dark,
             Event::Dark(dark) => {
                 self.state.dark = dark;
                 if self.state.continuous_scroll {

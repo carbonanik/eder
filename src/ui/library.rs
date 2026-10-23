@@ -36,8 +36,8 @@ impl Eder {
                 ui.set_width(width);
                 ui.set_min_height(TILE_HEIGHT);
                 egui::Frame::none()
-                    .fill(LIGHT)
-                    .stroke(egui::Stroke::new(1.0_f32, HAIRLINE))
+                    .fill(palette(ui.visuals()).light)
+                    .stroke(egui::Stroke::new(1.0_f32, palette(ui.visuals()).hairline))
                     .rounding(2.0)
                     .inner_margin(PADDING)
                     .show(ui, |ui| {
@@ -57,9 +57,9 @@ impl Eder {
                             rect,
                             8.0,
                             if response.hovered() && e.available {
-                                Color32::from_rgb(207, 226, 218)
+                                palette(ui.visuals()).hover
                             } else {
-                                SAGE
+                                palette(ui.visuals()).sage
                             },
                         );
 
@@ -98,13 +98,14 @@ impl Eder {
                         } else {
                             let paper =
                                 egui::Rect::from_center_size(rect.center(), Vec2::new(85.0, 112.0));
-                            ui.painter().rect_filled(paper, 5.0, Color32::WHITE);
+                            ui.painter()
+                                .rect_filled(paper, 5.0, palette(ui.visuals()).light);
                             ui.painter().text(
                                 paper.center(),
                                 egui::Align2::CENTER_CENTER,
                                 "PDF",
                                 egui::FontId::proportional(19.0),
-                                TEAL,
+                                palette(ui.visuals()).teal,
                             );
                         }
 
@@ -148,9 +149,9 @@ impl Eder {
                                 })
                                 .small()
                                 .color(if !e.available {
-                                    Color32::DARK_RED
+                                    palette(ui.visuals()).error
                                 } else {
-                                    Color32::GRAY
+                                    palette(ui.visuals()).muted
                                 }),
                             );
                         });
@@ -228,8 +229,8 @@ impl Eder {
             self.ui.pending.insert(e.path.clone());
         }
         egui::Frame::none()
-            .fill(LIGHT)
-            .stroke(egui::Stroke::new(1.0_f32, HAIRLINE))
+            .fill(palette(ui.visuals()).light)
+            .stroke(egui::Stroke::new(1.0_f32, palette(ui.visuals()).hairline))
             .rounding(2.0)
             .inner_margin(10.0)
             .show(ui, |ui| {
@@ -237,7 +238,8 @@ impl Eder {
                 ui.horizontal(|ui| {
                     let (rect, response) =
                         ui.allocate_exact_size(Vec2::new(50.0, 62.0), egui::Sense::click());
-                    ui.painter().rect_filled(rect, 5.0, SAGE);
+                    ui.painter()
+                        .rect_filled(rect, 5.0, palette(ui.visuals()).sage);
                     if let Some(Some(texture)) = self.ui.textures.get(&e.path) {
                         let size = texture.size_vec2();
                         let scale = (rect.width() / size.x).min(rect.height() / size.y).min(1.0);
@@ -249,14 +251,19 @@ impl Eder {
                         );
                     } else {
                         if e.directory {
-                            paint_icon(ui.painter(), rect.shrink(15.0), UiIcon::Folder, TEAL);
+                            paint_icon(
+                                ui.painter(),
+                                rect.shrink(15.0),
+                                UiIcon::Folder,
+                                palette(ui.visuals()).teal,
+                            );
                         } else {
                             ui.painter().text(
                                 rect.center(),
                                 egui::Align2::CENTER_CENTER,
                                 "PDF",
                                 egui::FontId::proportional(15.0),
-                                TEAL,
+                                palette(ui.visuals()).teal,
                             );
                         }
                     }
@@ -288,7 +295,7 @@ impl Eder {
                                 "PDF DOCUMENT"
                             })
                             .size(11.0)
-                            .color(MUTED),
+                            .color(palette(ui.visuals()).muted),
                         );
                     });
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -341,7 +348,7 @@ impl Eder {
                 RichText::new("A quiet place\nfor your PDFs.")
                     .size(39.0)
                     .strong()
-                    .color(INK),
+                    .color(palette(ui.visuals()).ink),
             );
             ui.label("No library folder is configured. Open Settings to choose one.");
             if ui.button("Open Settings").clicked() {

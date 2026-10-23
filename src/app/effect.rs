@@ -12,6 +12,7 @@ pub enum Task {
     Open(PathBuf, bool, u64),
     Position(PathBuf, ReadingPosition, bool),
     Dark(bool),
+    DarkTheme(bool),
     ReadingMode(bool),
     Close(PathBuf, ReadingPosition, u64),
     Shutdown(Option<(PathBuf, ReadingPosition)>),

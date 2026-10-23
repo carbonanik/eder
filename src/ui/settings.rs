@@ -23,7 +23,7 @@ impl Eder {
             RichText::new("Your library,\non your device.")
                 .size(42.0)
                 .strong()
-                .color(INK),
+                .color(palette(ui.visuals()).ink),
         );
         ui.label("Choose the folder containing your PDFs. Subfolders stay organized as they are.");
         ui.add_space(18.0);
@@ -57,6 +57,22 @@ impl Eder {
             }
         }
         ui.add_space(28.0);
+        ui.separator();
+        ui.add_space(18.0);
+        ui.label(RichText::new("Appearance").strong());
+        ui.label("Choose the theme for your workspace.");
+        let mut dark_theme = self.app.state.dark_theme;
+        ui.horizontal(|ui| {
+            if theme_switch(ui, &mut dark_theme).changed() {
+                self.send(Task::DarkTheme(dark_theme));
+            }
+            ui.label(if dark_theme {
+                "Dark theme"
+            } else {
+                "Light theme"
+            });
+        });
+        ui.add_space(18.0);
         ui.separator();
         ui.add_space(18.0);
         ui.label(RichText::new("Reading Mode").strong());

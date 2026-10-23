@@ -6,5 +6,6 @@ pub struct Snapshot {
     pub favorites: Vec<PathBuf>,
     pub history: Vec<PathBuf>,
     pub dark: bool,
+    pub dark_theme: bool,
     pub continuous_scroll: bool,
 }

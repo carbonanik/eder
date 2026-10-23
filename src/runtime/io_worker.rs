@@ -187,6 +187,11 @@ pub(super) fn run(data: Option<PathBuf>, worker: IoWorker) {
                     }
                     return Ok(());
                 }
+                Task::DarkTheme(b) => {
+                    store.dark_theme(b)?;
+                    send(Event::DarkTheme(b));
+                    return Ok(());
+                }
                 Task::Dark(b) => {
                     store.dark(b)?;
                     send(Event::Dark(b));

@@ -19,6 +19,7 @@ pub enum Event {
     Error(String),
     Fatal(String),
     Dark(bool),
+    DarkTheme(bool),
     ReadingMode(bool),
     Closed,
     StorageCommitted,
