@@ -25,6 +25,8 @@ fn pressed(ctx: &egui::Context, modifiers: Modifiers, key: Key) -> bool {
                         key,
                         Key::ArrowLeft
                             | Key::ArrowRight
+                            | Key::ArrowUp
+                            | Key::ArrowDown
                             | Key::PageUp
                             | Key::PageDown
                             | Key::Space
@@ -171,6 +173,44 @@ mod tests {
     }
 
     #[test]
+    fn arrow_scrolling_moves_the_reader_without_pointer_hover_and_repeats() {
+        let ctx = egui::Context::default();
+        ctx.style_mut(|style| style.scroll_animation = egui::style::ScrollAnimation::none());
+        let (mut app, _tasks) = app(&ctx);
+        app.app.state.continuous_scroll = true;
+        app.app.reader.as_mut().unwrap().geometry =
+            vec![crate::domain::document::PageGeometry::new(400.0, 600.0, 0).unwrap(); 5];
+        let mut offsets = Vec::new();
+        let mut held_down = input(Key::ArrowDown, Modifiers::NONE, false);
+        held_down.events.remove(0); // No release: egui treats this as a held key repeating.
+        for input in [
+            egui::RawInput::default(),
+            input(Key::ArrowDown, Modifiers::NONE, false),
+            held_down,
+            input(Key::ArrowUp, Modifiers::NONE, false),
+        ] {
+            let _ = ctx.run(input, |ctx| {
+                egui::CentralPanel::default().show(ctx, |ui| app.continuous_reader_ui(ui));
+            });
+            // Egui applies a programmatic scroll target at the start of the next frame.
+            let _ = ctx.run(egui::RawInput::default(), |ctx| {
+                egui::CentralPanel::default().show(ctx, |ui| app.continuous_reader_ui(ui));
+            });
+            let reader = app.app.reader.as_ref().unwrap();
+            offsets.push(
+                reader
+                    .layout
+                    .as_ref()
+                    .unwrap()
+                    .offset(reader.reading_position(true)),
+            );
+        }
+        assert!(offsets[1] > offsets[0], "{offsets:?}");
+        assert!(offsets[2] > offsets[1]);
+        assert!(offsets[3] < offsets[2]);
+    }
+
+    #[test]
     fn text_editing_and_modified_navigation_do_not_turn_pages() {
         let ctx = egui::Context::default();
         let (mut app, _tasks) = app(&ctx);
@@ -190,11 +230,32 @@ mod tests {
             app.keyboard_shortcuts(ctx);
             assert!(ctx.input(|i| i.key_pressed(Key::ArrowRight)));
         });
+        let _ = ctx.run(input(Key::ArrowDown, Modifiers::NONE, false), |ctx| {
+            // Keep the focused editor present while checking its key is left untouched.
+            egui::CentralPanel::default().show(ctx, |ui| {
+                ui.text_edit_singleline(&mut text).request_focus();
+                assert_eq!(app.reader_scroll_delta(ctx), Vec2::ZERO);
+                assert!(ctx.input(|i| i.key_pressed(Key::ArrowDown)));
+            });
+        });
         assert_eq!(app.app.reader.as_ref().unwrap().page, 2);
     }
 }
 
 impl Eder {
+    pub(crate) fn reader_scroll_delta(&self, ctx: &egui::Context) -> Vec2 {
+        if ctx.wants_keyboard_input()
+            || self.ui.shortcuts_open
+            || self.ui.dialog.is_some()
+            || self.ui.file_dialog.is_some()
+        {
+            return Vec2::ZERO;
+        }
+        let up = pressed(ctx, Modifiers::NONE, Key::ArrowUp);
+        let down = pressed(ctx, Modifiers::NONE, Key::ArrowDown);
+        Vec2::new(0.0, 60.0 * (i32::from(up) - i32::from(down)) as f32)
+    }
+
     pub(crate) fn keyboard_shortcuts(&mut self, ctx: &egui::Context) {
         let fullscreen = ctx.input(|i| i.viewport().fullscreen.unwrap_or(false));
         if pressed(ctx, Modifiers::NONE, Key::F11)
@@ -400,6 +461,7 @@ impl Eder {
                             (format!("{command}+,"), "Settings (library)"),
                             ("→ / Page Down / Space".into(), "Next page"),
                             ("← / Page Up / Shift+Space".into(), "Previous page"),
+                            ("↑ / ↓".into(), "Scroll up / down"),
                             ("Home / End".into(), "First / last page"),
                             (format!("{command}+S"), "Save reading position"),
                             (format!("{command}++ / {command}+-"), "Zoom in / out"),

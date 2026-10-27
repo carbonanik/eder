@@ -116,6 +116,7 @@ impl Eder {
                 let desired = Self::page_edge(ui.available_size(),
                     self.app.reader.as_ref().unwrap().zoom, ui.ctx().pixels_per_point(), false);
                 self.set_page_edge(desired);
+                let keyboard_scroll = self.reader_scroll_delta(ui.ctx());
                 let r = self.app.reader.as_ref().unwrap();
                 if r.loading && r.pending_page.is_none() && self.ui.current_page.is_none() {
                     self.render();
@@ -138,6 +139,7 @@ impl Eder {
                     let mut area = egui::ScrollArea::both().id_salt(("page", &r.path, r.page));
                     if let Some(anchor) = restore { area=area.scroll_offset(Vec2::new(anchor.horizontal*size.x, if anchor.anchor_version==1 { anchor.fraction*size.y } else { 0.0 })); }
                     let result = area.show(ui, |ui| {
+                            ui.scroll_with_delta(keyboard_scroll);
                             ui.horizontal(|ui| {
                                 ui.add_space(((ui.available_width() - size.x) / 2.0).max(0.0));
                                 let image = ui.add(egui::Image::new(t).fit_to_exact_size(size));
@@ -160,6 +162,7 @@ impl Eder {
     }
     pub(crate) fn continuous_reader_ui(&mut self, ui: &mut egui::Ui) {
         use crate::app::reader::layout::PageLayout;
+        let keyboard_scroll = self.reader_scroll_delta(ui.ctx());
         let zoom = self.app.reader.as_ref().unwrap().zoom;
         let desired = Self::page_edge(ui.available_size(), zoom, ui.ctx().pixels_per_point(), true);
         self.set_page_edge(desired);
@@ -201,6 +204,7 @@ impl Eder {
         let mut retry = None;
         let mut jump = None;
         let result = area.show_viewport(ui, |ui, viewport| {
+            ui.scroll_with_delta(keyboard_scroll);
             let content_width = (width * zoom).max(viewport.width());
             ui.set_min_size(Vec2::new(content_width, layout.total_height));
             let origin = ui.min_rect().min;

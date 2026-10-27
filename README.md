@@ -97,6 +97,7 @@ Keyboard shortcuts use **Ctrl** on Linux/Windows and **Command** on macOS:
 | Ctrl/Command+1, +2, +3 | Library, Currently Reading, Favorites |
 | Ctrl/Command+, | Open Settings from the library |
 | Left/Right, Page Up/Page Down | Previous/next page |
+| Up / Down | Scroll up/down (hold to keep scrolling) |
 | Shift+Space / Space | Previous/next page |
 | Home / End | First/last page |
 | Ctrl/Command+S | Save reading position |
