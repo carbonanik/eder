@@ -9,91 +9,95 @@ impl Eder {
             });
             return;
         }
-        egui::TopBottomPanel::top("reader_toolbar")
-            .frame(
-                egui::Frame::none()
-                    .fill(palette(&ctx.style().visuals).paper)
-                    .inner_margin(egui::Margin::symmetric(20.0, 12.0)),
-            )
-            .show(ctx, |ui| {
-                ui.horizontal_wrapped(|ui| {
-                    if icon_label_button(
-                        ui,
-                        UiIcon::ArrowLeft,
-                        "Back",
-                        IconLabelStyle {
-                            size: Vec2::new(78.0, 28.0),
-                            fill: ui.visuals().widgets.inactive.bg_fill,
-                            color: ui.visuals().text_color(),
-                            text_size: 14.0,
-                            rounding: 4.0,
-                        },
-                    )
-                    .clicked()
-                    {
-                        self.back();
+        if !ctx.input(|input| input.viewport().fullscreen.unwrap_or(false)) {
+            egui::TopBottomPanel::top("reader_toolbar")
+                .frame(
+                    egui::Frame::none()
+                        .fill(palette(&ctx.style().visuals).paper)
+                        .inner_margin(egui::Margin::symmetric(20.0, 12.0)),
+                )
+                .show(ctx, |ui| {
+                    ui.horizontal_wrapped(|ui| {
+                        if icon_label_button(
+                            ui,
+                            UiIcon::ArrowLeft,
+                            "Back",
+                            IconLabelStyle {
+                                size: Vec2::new(78.0, 28.0),
+                                fill: ui.visuals().widgets.inactive.bg_fill,
+                                color: ui.visuals().text_color(),
+                                text_size: 14.0,
+                                rounding: 4.0,
+                            },
+                        )
+                        .clicked()
+                        {
+                            self.back();
+                            return;
+                        }
+                        self.window_controls(ui);
+                        if let Some(r) = &self.app.reader {
+                            ui.label(
+                                RichText::new(
+                                    r.path.file_name().unwrap_or_default().to_string_lossy(),
+                                )
+                                .strong(),
+                            );
+                        }
+                    });
+                    if self.app.reader.is_none() {
                         return;
                     }
-                    self.window_controls(ui);
-                    if let Some(r) = &self.app.reader {
-                        ui.label(
-                            RichText::new(r.path.file_name().unwrap_or_default().to_string_lossy())
-                                .strong(),
-                        );
-                    }
-                });
-                if self.app.reader.is_none() {
-                    return;
-                }
-                let (page, total) = {
-                    let r = self.app.reader.as_ref().unwrap();
-                    (r.page, r.total)
-                };
-                ui.horizontal_wrapped(|ui| {
-                    if ui
-                        .add_enabled(page > 1, egui::Button::new("Previous"))
-                        .clicked()
-                    {
-                        self.turn(page - 1);
-                    }
-                    let mut jump = page;
-                    ui.label("Page");
-                    if ui
-                        .add(egui::DragValue::new(&mut jump).range(1..=total))
-                        .changed()
-                    {
-                        self.turn(jump);
-                    }
-                    ui.label(format!("of {total}"));
-                    if ui
-                        .add_enabled(page < total, egui::Button::new("Next"))
-                        .clicked()
-                    {
-                        self.turn(page + 1);
-                    }
-                    if ui
-                        .button("Save Position")
-                        .on_hover_text("Save reading position (Ctrl/Cmd+S)")
-                        .clicked()
-                    {
-                        self.save_reading_position();
-                    }
-                    let mut dark = self.app.state.dark;
-                    if ui.checkbox(&mut dark, "Dark pages").changed() {
-                        self.send(Task::Dark(dark));
-                    }
-                    if let Some(r) = &mut self.app.reader {
+                    let (page, total) = {
+                        let r = self.app.reader.as_ref().unwrap();
+                        (r.page, r.total)
+                    };
+                    ui.horizontal_wrapped(|ui| {
                         if ui
-                            .add(egui::Slider::new(&mut r.zoom, 0.5..=3.0).text("Zoom"))
+                            .add_enabled(page > 1, egui::Button::new("Previous"))
+                            .clicked()
+                        {
+                            self.turn(page - 1);
+                        }
+                        let mut jump = page;
+                        ui.label("Page");
+                        if ui
+                            .add(egui::DragValue::new(&mut jump).range(1..=total))
                             .changed()
                         {
-                            r.scroll_to =
-                                Some(r.reading_position(self.app.state.continuous_scroll));
-                            r.position_changed_at = Some(std::time::Instant::now());
+                            self.turn(jump);
                         }
-                    }
+                        ui.label(format!("of {total}"));
+                        if ui
+                            .add_enabled(page < total, egui::Button::new("Next"))
+                            .clicked()
+                        {
+                            self.turn(page + 1);
+                        }
+                        if ui
+                            .button("Save Position")
+                            .on_hover_text("Save reading position (Ctrl/Cmd+S)")
+                            .clicked()
+                        {
+                            self.save_reading_position();
+                        }
+                        let mut dark = self.app.state.dark;
+                        if ui.checkbox(&mut dark, "Dark pages").changed() {
+                            self.send(Task::Dark(dark));
+                        }
+                        if let Some(r) = &mut self.app.reader {
+                            if ui
+                                .add(egui::Slider::new(&mut r.zoom, 0.5..=3.0).text("Zoom"))
+                                .changed()
+                            {
+                                r.scroll_to =
+                                    Some(r.reading_position(self.app.state.continuous_scroll));
+                                r.position_changed_at = Some(std::time::Instant::now());
+                            }
+                        }
+                    });
                 });
-            });
+        }
         if self.app.reader.is_none() {
             return;
         }
