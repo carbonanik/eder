@@ -108,6 +108,8 @@ impl eframe::App for Eder {
             });
             return;
         }
+        self.keyboard_shortcuts(ctx);
+        self.shortcuts_help(ctx);
         if self.app.message.is_some() {
             egui::TopBottomPanel::bottom("status").show(ctx, |ui| {
                 ui.horizontal_wrapped(|ui| {
@@ -129,11 +131,6 @@ impl eframe::App for Eder {
             // Preserve the optimized reader and precise continuous-scroll saving.
             self.flush_position_if_idle(ctx);
             return;
-        }
-        if ctx.input(|input| {
-            (input.modifiers.command || input.modifiers.ctrl) && input.key_pressed(egui::Key::K)
-        }) {
-            ctx.memory_mut(|m| m.request_focus(egui::Id::new("eder-search")));
         }
         if ctx.screen_rect().width() > 820.0 {
             egui::SidePanel::left("sidebar")
@@ -189,3 +186,4 @@ mod tests;
 mod events;
 mod library;
 mod reader;
+mod shortcuts;

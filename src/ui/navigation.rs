@@ -109,7 +109,7 @@ impl Eder {
                 )
             })
             .inner;
-        if add.clicked() {
+        if add.on_hover_text("Add documents (Ctrl/Cmd+O)").clicked() {
             self.pick_pdfs(ui.ctx());
         }
         ui.add_space(26.0);
@@ -223,9 +223,13 @@ impl Eder {
                     );
                     if width > 230.0 {
                         ui.label(
-                            RichText::new("Ctrl K")
-                                .size(10.0)
-                                .color(palette(ui.visuals()).muted),
+                            RichText::new(if cfg!(target_os = "macos") {
+                                "⌘ K"
+                            } else {
+                                "Ctrl K"
+                            })
+                            .size(10.0)
+                            .color(palette(ui.visuals()).muted),
                         );
                     }
                 });
@@ -290,12 +294,17 @@ impl Eder {
 
     pub(crate) fn toolbar(&mut self, ui: &mut egui::Ui) {
         let compact = ui.available_width() < 770.0;
-        ui.label(
-            RichText::new("WORKSPACE / DOCUMENTS")
-                .size(10.0)
-                .strong()
-                .color(palette(ui.visuals()).teal),
-        );
+        ui.horizontal(|ui| {
+            self.window_controls(ui);
+            if ui.available_width() > 160.0 {
+                ui.label(
+                    RichText::new("WORKSPACE / DOCUMENTS")
+                        .size(10.0)
+                        .strong()
+                        .color(palette(ui.visuals()).teal),
+                );
+            }
+        });
         ui.add_space(3.0);
         ui.horizontal(|ui| {
             ui.label(
@@ -335,7 +344,7 @@ impl Eder {
                             rounding: 2.0,
                         },
                     )
-                    .on_hover_text("Refresh documents")
+                    .on_hover_text("Refresh documents (F5 or Ctrl/Cmd+R)")
                     .clicked()
                 {
                     self.refresh();

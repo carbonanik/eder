@@ -34,6 +34,7 @@ impl Eder {
                         self.back();
                         return;
                     }
+                    self.window_controls(ui);
                     if let Some(r) = &self.app.reader {
                         ui.label(
                             RichText::new(r.path.file_name().unwrap_or_default().to_string_lossy())
@@ -44,14 +45,9 @@ impl Eder {
                 if self.app.reader.is_none() {
                     return;
                 }
-                let (page, total, path, position) = {
+                let (page, total) = {
                     let r = self.app.reader.as_ref().unwrap();
-                    (
-                        r.page,
-                        r.total,
-                        r.path.clone(),
-                        r.reading_position(self.app.state.continuous_scroll),
-                    )
+                    (r.page, r.total)
                 };
                 ui.horizontal_wrapped(|ui| {
                     if ui
@@ -75,12 +71,12 @@ impl Eder {
                     {
                         self.turn(page + 1);
                     }
-                    if ui.button("Save Position").clicked()
-                        && self.send(Task::Position(path, position, true))
+                    if ui
+                        .button("Save Position")
+                        .on_hover_text("Save reading position (Ctrl/Cmd+S)")
+                        .clicked()
                     {
-                        if let Some(r) = &mut self.app.reader {
-                            r.position_changed_at = None;
-                        }
+                        self.save_reading_position();
                     }
                     let mut dark = self.app.state.dark;
                     if ui.checkbox(&mut dark, "Dark pages").changed() {
@@ -100,29 +96,6 @@ impl Eder {
             });
         if self.app.reader.is_none() {
             return;
-        }
-        if !ctx.wants_keyboard_input() {
-            let page = self.app.reader.as_ref().unwrap().page;
-            if ctx.input(|i| {
-                i.key_pressed(egui::Key::ArrowRight) || i.key_pressed(egui::Key::PageDown)
-            }) {
-                self.turn(page.saturating_add(1));
-            }
-            if ctx
-                .input(|i| i.key_pressed(egui::Key::ArrowLeft) || i.key_pressed(egui::Key::PageUp))
-            {
-                self.turn(page.saturating_sub(1));
-            }
-            if ctx.input(|i| i.key_pressed(egui::Key::Home)) {
-                self.turn(1);
-            }
-            if ctx.input(|i| i.key_pressed(egui::Key::End)) {
-                self.turn(self.app.reader.as_ref().unwrap().total);
-            }
-            if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
-                self.back();
-                return;
-            }
         }
         let mut internal_jump = None;
         egui::CentralPanel::default()

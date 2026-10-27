@@ -19,6 +19,7 @@ pub(crate) struct UiState {
     pub pages: VecDeque<super::textures::CachedPage>,
     pub current_page: Option<TextureHandle>,
     pub closing_started: Option<std::time::Instant>,
+    pub(crate) shortcuts_open: bool,
 }
 
 impl UiState {
@@ -39,6 +40,7 @@ impl UiState {
             pages: VecDeque::new(),
             current_page: None,
             closing_started: None,
+            shortcuts_open: false,
         }
     }
 }

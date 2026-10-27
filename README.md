@@ -85,7 +85,27 @@ Flathub manifest or a tested Flatpak build.
 3. Open a PDF to read it. Eder remembers each PDF’s page, within-page offset, zoom and horizontal pan. Use **Save Position** to explicitly save and confirm the current page.
 4. Mark a PDF as a favorite for quick access. Open **Currently Reading** for recently opened PDFs; removing an entry from that list does not delete or modify the source file.
 
-Choose **Settings → Reading Mode** to switch between **Single Page** and **Continuous Scroll**; the selection is saved locally. In continuous mode, visible pages load incrementally and up to three pages before and after the visible range are prefetched to reduce blank-page flicker while scrolling. Reader keyboard controls: Left/Right or Page Up/Page Down to change pages, Home/End to jump to the first/last page, and Escape to return to the library. Use scrollbars or a trackpad to pan a zoomed page. Dark mode inverts document colors, including images. Text selection, search, annotations, printing, and password entry are not implemented. Password-protected PDFs that require a password produce an error.
+Choose **Settings → Reading Mode** to switch between **Single Page** and **Continuous Scroll**; the selection is saved locally. In continuous mode, visible pages load incrementally and up to three pages before and after the visible range are prefetched to reduce blank-page flicker while scrolling. Press **F1** or click **Shortcuts** for the keyboard reference. Press **F11** (also **Control+Command+F** on macOS) to toggle fullscreen. Escape dismisses shortcut help, exits fullscreen, leaves a focused field, or returns from the reader to the library, in that order. Use scrollbars or a trackpad to pan a zoomed page. Dark mode inverts document colors, including images. Text selection, search, annotations, printing, and password entry are not implemented. Password-protected PDFs that require a password produce an error.
+
+Keyboard shortcuts use **Ctrl** on Linux/Windows and **Command** on macOS:
+
+| Shortcut | Action |
+| --- | --- |
+| Ctrl/Command+O | Add PDFs from the library |
+| Ctrl/Command+K or +F | Search library documents |
+| F5 or Ctrl/Command+R | Refresh library documents |
+| Ctrl/Command+1, +2, +3 | Library, Currently Reading, Favorites |
+| Ctrl/Command+, | Open Settings from the library |
+| Left/Right, Page Up/Page Down | Previous/next page |
+| Shift+Space / Space | Previous/next page |
+| Home / End | First/last page |
+| Ctrl/Command+S | Save reading position |
+| Ctrl/Command++ / +- | Zoom in/out (Ctrl/Command+= also zooms in) |
+| Ctrl/Command+0 | Reset zoom |
+| Ctrl/Command+W | Close the document, or close the library window |
+| Ctrl/Command+Q | Quit and save pending changes |
+
+Page navigation shortcuts are inactive while editing a text field. Library search searches document names; PDF text search is not implemented.
 
 ## Performance design
 

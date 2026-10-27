@@ -61,6 +61,7 @@ fn compact_and_wide_layouts_virtualize_large_libraries() {
             pages: VecDeque::new(),
             current_page: None,
             closing_started: None,
+            shortcuts_open: false,
         },
     };
     for width in [360.0, 1100.0] {
