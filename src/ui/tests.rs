@@ -46,6 +46,7 @@ fn compact_and_wide_layouts_virtualize_large_libraries() {
             open_request: 0,
         },
         ui: crate::ui::state::UiState {
+            annotations: Default::default(),
             logo: load_logo(&ctx),
             search_query_cached: String::new(),
             search_indices: Vec::new(),
@@ -97,6 +98,8 @@ fn compact_and_wide_layouts_virtualize_large_libraries() {
         closing: false,
         zoom: 1.0,
         links: HashMap::new(),
+        text: HashMap::new(),
+        annotations: Vec::new(),
         link_pending: HashSet::new(),
         target_edge: 1024,
         last_visible_page: None,

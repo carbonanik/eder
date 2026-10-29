@@ -453,3 +453,79 @@ mod tests {
         assert!(runtime.shutdown.try_take().is_some());
     }
 }
+
+#[cfg(test)]
+mod annotation_workflow_tests {
+    use super::*;
+    use crate::domain::annotation::Annotation;
+
+    #[test]
+    fn accepted_annotations_are_committed_before_export_and_delete() {
+        let dir = tempfile::tempdir().unwrap();
+        let document = dir.path().join("book.pdf");
+        let destination = dir.path().join("notes.md");
+        let mut runtime = RuntimeClient::start(
+            AppPaths {
+                data: Some(dir.path().into()),
+                cache: dir.path().join("cache"),
+            },
+            Arc::new(|| {}),
+            Arc::new(|pixels: crate::domain::pixels::Pixels| pixels),
+        );
+        let item = Annotation {
+            id: 0,
+            page: 7,
+            text: "Selected words".into(),
+            note: "My note\nNext line".into(),
+            color: Some(2),
+            bounds: vec![[0.1, 0.2, 0.3, 0.4]],
+        };
+        runtime
+            .submit(Task::SaveAnnotation(document.clone(), Box::new(item)))
+            .unwrap();
+        runtime
+            .submit(Task::ExportAnnotations(
+                document.clone(),
+                destination.clone(),
+            ))
+            .unwrap();
+        let mut saved_id = None;
+        loop {
+            match runtime.rx.recv_timeout(Duration::from_secs(5)).unwrap() {
+                Event::Annotations(path, items) => {
+                    assert_eq!(path, document);
+                    saved_id = Some(items[0].id);
+                }
+                Event::Notice(message) if message == "Annotations exported." => break,
+                Event::Error(e) | Event::Fatal(e) => panic!("{e}"),
+                _ => {}
+            }
+        }
+        let export = std::fs::read_to_string(destination).unwrap();
+        assert!(export.contains("Page 7 — Highlight"));
+        assert!(export.contains("> Selected words"));
+        assert!(export.contains("My note\nNext line"));
+        runtime
+            .submit(Task::DeleteAnnotation(document, saved_id.unwrap()))
+            .unwrap();
+        loop {
+            match runtime.rx.recv_timeout(Duration::from_secs(5)).unwrap() {
+                Event::Annotations(_, items) => {
+                    assert!(items.is_empty());
+                    break;
+                }
+                Event::Error(e) | Event::Fatal(e) => panic!("{e}"),
+                _ => {}
+            }
+        }
+        runtime.submit(Task::Shutdown(None)).unwrap();
+        loop {
+            match runtime.rx.recv_timeout(Duration::from_secs(5)).unwrap() {
+                Event::StorageCommitted => runtime.finish_shutdown(),
+                Event::Closed => break,
+                Event::Fatal(e) | Event::ShutdownFailed(e) => panic!("{e}"),
+                _ => {}
+            }
+        }
+    }
+}

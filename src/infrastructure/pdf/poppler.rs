@@ -313,6 +313,22 @@ impl crate::services::ports::PdfEngine for Poppler {
     ) -> Result<image::RgbaImage, AppError> {
         raster(path, page, edge, cache, generation, expected)
     }
+    fn text(
+        &self,
+        path: &Path,
+        page: u32,
+        geometry: crate::domain::document::PageGeometry,
+        generation: &Arc<AtomicU64>,
+        expected: u64,
+    ) -> Result<Vec<crate::domain::annotation::TextWord>, AppError> {
+        let mut command = Command::new(program("pdftotext"));
+        command
+            .args(["-bbox", "-f", &page.to_string(), "-l", &page.to_string()])
+            .arg(path)
+            .arg("-");
+        let bytes = execute(command, generation, expected)?;
+        parse_text(&String::from_utf8_lossy(&bytes), Some(geometry))
+    }
     fn links(
         &self,
         path: &Path,
@@ -432,5 +448,148 @@ mod link_tests {
         assert_eq!(internal_page("https://example.com/path#3", 12), None);
         let xml = r##"<page number="2" width="0" height="500"><text left="2" top="1" width="3" height="3"><a href="#1">Item</a></text></page>"##;
         assert!(parse_page_links(xml, 2, 5).is_empty());
+    }
+}
+
+/// Poppler bbox output is XHTML with word boxes in displayed page coordinates.
+fn parse_text(
+    xml: &str,
+    geometry: Option<crate::domain::document::PageGeometry>,
+) -> Result<Vec<crate::domain::annotation::TextWord>, AppError> {
+    let page = xml
+        .find("<page ")
+        .and_then(|i| xml.get(i..))
+        .ok_or_else(|| AppError::InvalidDocument("Missing text page dimensions.".into()))?;
+    let end = page
+        .find('>')
+        .ok_or_else(|| AppError::InvalidDocument("Invalid text page.".into()))?;
+    let dimension = |name| {
+        xml_attr(&page[..end], name)
+            .and_then(|v| v.parse::<f32>().ok())
+            .filter(|v| v.is_finite() && *v > 0.0)
+    };
+    let (Some(width), Some(height)) = (dimension("width"), dimension("height")) else {
+        return Err(AppError::InvalidDocument("Invalid text dimensions.".into()));
+    };
+    // pdftotext reports unrotated dimensions but rotates word coordinates.
+    let (width, height) = geometry
+        .map(|g| (g.width, g.height))
+        .unwrap_or((width, height));
+    let mut words = Vec::new();
+    let mut rest = &page[end + 1..];
+    while let Some(start) = rest.find("<word ") {
+        rest = &rest[start..];
+        let Some(end) = rest.find('>') else {
+            break;
+        };
+        let Some(close) = rest.find("</word>") else {
+            break;
+        };
+        let coords = ["xMin", "yMin", "xMax", "yMax"]
+            .map(|name| xml_attr(&rest[..end], name).and_then(|v| v.parse::<f32>().ok()));
+        if let [Some(l), Some(t), Some(r), Some(b)] = coords {
+            let bounds = [l / width, t / height, r / width, b / height].map(|v| v.clamp(0.0, 1.0));
+            if bounds.iter().all(|v| v.is_finite())
+                && bounds[0] < bounds[2]
+                && bounds[1] < bounds[3]
+            {
+                words.push(crate::domain::annotation::TextWord {
+                    text: decode_xml(&rest[end + 1..close]),
+                    bounds,
+                });
+            }
+        }
+        rest = &rest[close + 7..];
+    }
+    Ok(words)
+}
+fn decode_xml(text: &str) -> String {
+    let mut out = String::new();
+    let mut rest = text;
+    while let Some(start) = rest.find('&') {
+        out.push_str(&rest[..start]);
+        rest = &rest[start..];
+        let Some(end) = rest.find(';') else {
+            break;
+        };
+        let entity = &rest[1..end];
+        let ch = match entity {
+            "amp" => Some('&'),
+            "lt" => Some('<'),
+            "gt" => Some('>'),
+            "quot" => Some('"'),
+            "apos" => Some('\''),
+            _ => entity
+                .strip_prefix("#x")
+                .and_then(|n| u32::from_str_radix(n, 16).ok())
+                .or_else(|| entity.strip_prefix('#').and_then(|n| n.parse().ok()))
+                .and_then(char::from_u32),
+        };
+        if let Some(ch) = ch {
+            out.push(ch);
+        } else {
+            out.push_str(&rest[..=end]);
+        }
+        rest = &rest[end + 1..];
+    }
+    out.push_str(rest);
+    out
+}
+
+#[cfg(test)]
+mod text_tests {
+    use super::*;
+    use crate::services::ports::PdfEngine;
+    #[test]
+    fn normalizes_word_bounds_and_decodes_entities() {
+        let words=parse_text(r#"<page width="400" height="800"><word xMin="40" yMin="80" xMax="200" yMax="100">A&amp;B &#x1F600; &#233;</word><word xMin="NaN" yMin="0" xMax="20" yMax="10">bad</word></page>"#, None).unwrap();
+        assert_eq!(words.len(), 1);
+        assert_eq!(words[0].text, "A&B 😀 é");
+        assert_eq!(words[0].bounds, [0.1, 0.1, 0.5, 0.125]);
+        assert!(parse_text(r#"<page width="0" height="800"></page>"#, None).is_err());
+        assert!(
+            parse_text(r#"<page width="400" height="800"></page>"#, None)
+                .unwrap()
+                .is_empty()
+        );
+    }
+    #[test]
+    #[ignore = "Requires Poppler executables on PATH"]
+    fn extracts_only_requested_fixture_page_and_honors_cancellation() {
+        let generation = Arc::new(AtomicU64::new(1));
+        let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/sample.pdf");
+        let words = Poppler
+            .text(
+                &path,
+                2,
+                crate::domain::document::PageGeometry {
+                    width: 400.0,
+                    height: 550.0,
+                },
+                &generation,
+                1,
+            )
+            .unwrap();
+        assert_eq!(
+            words
+                .iter()
+                .map(|w| w.text.as_str())
+                .collect::<Vec<_>>()
+                .join(" "),
+            "Folio test document Page 2 of 3"
+        );
+        assert!(matches!(
+            Poppler.text(
+                &path,
+                2,
+                crate::domain::document::PageGeometry {
+                    width: 400.0,
+                    height: 550.0
+                },
+                &generation,
+                0
+            ),
+            Err(AppError::Cancelled)
+        ));
     }
 }

@@ -35,6 +35,7 @@ impl Eder {
                     Transition::ResetReader => {
                         self.runtime.page_gen.fetch_add(1, Ordering::AcqRel);
                         self.runtime.link_gen.fetch_add(1, Ordering::AcqRel);
+                        self.ui.annotations = Default::default();
                         self.ui.pages.clear();
                         self.ui.current_page = None;
                     }
@@ -125,6 +126,15 @@ impl Eder {
             if result.id == self.runtime.link_gen.load(Ordering::Acquire) {
                 if let Some(r) = &mut self.app.reader {
                     r.link_pending.remove(&result.page);
+                    match result.text {
+                        Ok(text) => {
+                            r.text.insert(result.page, text);
+                        }
+                        Err(e) => {
+                            self.app.message =
+                                Some((format!("Text selection unavailable: {e}"), true));
+                        }
+                    }
                     r.links.insert(result.page, result.links);
                     while r.links.len() > crate::policy::MAX_LINK_PAGES {
                         let farthest = r
@@ -134,6 +144,7 @@ impl Eder {
                             .max_by_key(|page| page.abs_diff(r.page));
                         if let Some(page) = farthest {
                             r.links.remove(&page);
+                            r.text.remove(&page);
                         } else {
                             break;
                         }

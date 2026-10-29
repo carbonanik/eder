@@ -28,6 +28,14 @@ pub trait PdfEngine {
         generation: &Arc<AtomicU64>,
         expected: u64,
     ) -> Result<image::RgbaImage, crate::domain::error::AppError>;
+    fn text(
+        &self,
+        path: &Path,
+        page: u32,
+        geometry: crate::domain::document::PageGeometry,
+        generation: &Arc<AtomicU64>,
+        expected: u64,
+    ) -> Result<Vec<crate::domain::annotation::TextWord>, crate::domain::error::AppError>;
     fn links(
         &self,
         path: &Path,
@@ -54,6 +62,16 @@ pub trait LibraryFilesystem {
 }
 
 pub trait LibraryRepository {
+    fn annotations(
+        &self,
+        path: &Path,
+    ) -> Result<Vec<crate::domain::annotation::Annotation>, String>;
+    fn save_annotation(
+        &mut self,
+        path: &Path,
+        item: &crate::domain::annotation::Annotation,
+    ) -> Result<(), String>;
+    fn delete_annotation(&self, path: &Path, id: i64) -> Result<(), String>;
     fn snapshot(&self) -> Result<crate::domain::settings::Snapshot, String>;
     fn take_pending(&mut self) -> Result<Option<std::path::PathBuf>, String>;
     fn root(&self, path: &Path) -> Result<(), String>;

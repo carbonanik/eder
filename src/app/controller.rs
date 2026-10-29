@@ -59,6 +59,11 @@ impl Controller {
     pub fn on_event(&mut self, event: Event) -> Vec<Transition> {
         let mut effects = Vec::new();
         match event {
+            Event::Annotations(path, items) => {
+                if let Some(reader) = self.reader.as_mut().filter(|r| r.path == path) {
+                    reader.annotations = items;
+                }
+            }
             Event::Snapshot(snapshot) => {
                 if self.lifecycle == crate::app::state::Lifecycle::Starting {
                     self.lifecycle = crate::app::state::Lifecycle::Running;
@@ -116,6 +121,8 @@ impl Controller {
                     closing: false,
                     zoom: position.zoom,
                     links: HashMap::new(),
+                    text: HashMap::new(),
+                    annotations: Vec::new(),
                     link_pending: HashSet::new(),
                     target_edge: 1024,
                     last_visible_page: None,

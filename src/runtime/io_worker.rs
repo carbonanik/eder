@@ -108,6 +108,23 @@ pub(super) fn run(data: Option<PathBuf>, worker: IoWorker) {
         };
         let result: Result<(), String> = (|| {
             match task {
+                Task::SaveAnnotation(path, item) => {
+                    store.save_annotation(&path, &item)?;
+                    send(Event::Annotations(path.clone(), store.annotations(&path)?));
+                    return Ok(());
+                }
+                Task::DeleteAnnotation(path, id) => {
+                    store.delete_annotation(&path, id)?;
+                    send(Event::Annotations(path.clone(), store.annotations(&path)?));
+                    return Ok(());
+                }
+                Task::ExportAnnotations(path, destination) => {
+                    let text =
+                        crate::domain::annotation::export_markdown(&store.annotations(&path)?);
+                    std::fs::write(destination, text).map_err(|e| e.to_string())?;
+                    send(Event::Notice("Annotations exported.".into()));
+                    return Ok(());
+                }
                 Task::Load(id, view, folder) => {
                     let s = store.snapshot()?;
                     let root = s.root.clone();
@@ -170,7 +187,15 @@ pub(super) fn run(data: Option<PathBuf>, worker: IoWorker) {
                     store.opened(&p, recovery)?;
                     // Do not overwrite the scroll fraction on open: this must survive
                     // until the first restored viewport frame is shown.
-                    send(Event::Open(p, position, total, id, geometry, revision));
+                    send(Event::Open(
+                        p.clone(),
+                        position,
+                        total,
+                        id,
+                        geometry,
+                        revision,
+                    ));
+                    send(Event::Annotations(p.clone(), store.annotations(&p)?));
                 }
                 Task::Position(p, position, explicit) => {
                     store.save_reading_position(&p, position)?;

@@ -132,3 +132,46 @@ fn page_geometry_matches_rotated_and_media_box_rasters() {
         assert!((image.width() as f32 / image.height() as f32 - expected).abs() < 0.02);
     }
 }
+
+#[test]
+#[ignore = "Requires Poppler executables on PATH"]
+fn selectable_text_matches_rotated_and_cropped_rasters() {
+    use eder::{infrastructure::pdf::poppler::Poppler, services::ports::PdfEngine};
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("mixed.pdf");
+    mixed_geometry_pdf(&path);
+    let generation = Arc::new(AtomicU64::new(1));
+    let geometry = Poppler.geometry(&path, 4, &generation, 1).unwrap();
+    for page in [3, 4] {
+        let words = Poppler
+            .text(&path, page, geometry[page as usize - 1], &generation, 1)
+            .unwrap();
+        assert_eq!(
+            words
+                .iter()
+                .map(|w| w.text.as_str())
+                .collect::<Vec<_>>()
+                .join(" "),
+            "Go to landscape"
+        );
+        let image = render::raster(&path, page, 1200, dir.path(), &generation, 1).unwrap();
+        for word in words {
+            // Every extracted word box must cover real ink in the displayed raster.
+            let [l, t, r, b] = word.bounds;
+            let mut ink = 0;
+            for y in (t * image.height() as f32) as u32..(b * image.height() as f32).ceil() as u32 {
+                for x in (l * image.width() as f32) as u32..(r * image.width() as f32).ceil() as u32
+                {
+                    if image.get_pixel(x.min(image.width() - 1), y.min(image.height() - 1))[0] < 128
+                    {
+                        ink += 1;
+                    }
+                }
+            }
+            assert!(
+                ink > 5,
+                "Word box must align with raster ink on page {page}"
+            );
+        }
+    }
+}

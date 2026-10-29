@@ -141,6 +141,7 @@ pub(super) fn links(
         let links = engine
             .links(&job.path, job.page, job.total, &generation, job.id)
             .unwrap_or_default();
+        let text = engine.text(&job.path, job.page, job.geometry, &generation, job.id);
         drop(permit);
         if generation.load(Ordering::Acquire) == job.id
             && !deliver(
@@ -149,6 +150,7 @@ pub(super) fn links(
                     id: job.id,
                     page: job.page,
                     links,
+                    text,
                 },
                 &lane.stop,
                 &lane.wake,

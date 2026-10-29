@@ -14,6 +14,8 @@ pub struct Reader {
     pub loading: bool,
     pub closing: bool,
     pub zoom: f32,
+    pub text: HashMap<u32, Vec<crate::domain::annotation::TextWord>>,
+    pub annotations: Vec<crate::domain::annotation::Annotation>,
     pub links: HashMap<u32, Vec<PdfLink>>,
     pub link_pending: HashSet<u32>,
     pub target_edge: u32,

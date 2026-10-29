@@ -41,8 +41,10 @@ impl Store {
         conn.busy_timeout(std::time::Duration::from_secs(2))
             .map_err(|e| e.to_string())?;
         super::migrations::apply(&mut conn)?;
-        conn.execute_batch("PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL;")
-            .map_err(|e| e.to_string())?;
+        conn.execute_batch(
+            "PRAGMA foreign_keys=ON; PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL;",
+        )
+        .map_err(|e| e.to_string())?;
         Ok(Self { conn })
     }
     pub fn setting(&self, key: &str) -> Result<Option<Vec<u8>>, String> {
@@ -170,6 +172,90 @@ impl Store {
 }
 
 impl crate::services::ports::LibraryRepository for Store {
+    fn annotations(
+        &self,
+        path: &Path,
+    ) -> Result<Vec<crate::domain::annotation::Annotation>, String> {
+        let mut stmt = self
+            .conn
+            .prepare(
+                "SELECT id,page,text,note,color FROM annotations WHERE path=? ORDER BY page,id",
+            )
+            .map_err(|e| e.to_string())?;
+        let mut items = stmt
+            .query_map([encode(path)], |r| {
+                Ok(crate::domain::annotation::Annotation {
+                    id: r.get(0)?,
+                    page: r.get(1)?,
+                    text: r.get(2)?,
+                    note: r.get(3)?,
+                    color: r.get(4)?,
+                    bounds: vec![],
+                })
+            })
+            .map_err(|e| e.to_string())?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| e.to_string())?;
+        for item in &mut items {
+            item.bounds = self
+                .conn
+                .prepare(
+                    "SELECT l,t,r,b FROM annotation_bounds WHERE annotation_id=? ORDER BY ordinal",
+                )
+                .map_err(|e| e.to_string())?
+                .query_map([item.id], |r| {
+                    Ok([r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?])
+                })
+                .map_err(|e| e.to_string())?
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(|e| e.to_string())?;
+        }
+        Ok(items)
+    }
+    fn save_annotation(
+        &mut self,
+        path: &Path,
+        item: &crate::domain::annotation::Annotation,
+    ) -> Result<(), String> {
+        item.validate()?;
+        let tx = self.conn.transaction().map_err(|e| e.to_string())?;
+        let id = if item.id == 0 {
+            let changed = tx.execute("INSERT INTO annotations(path,page,text,note,color) VALUES(?1,?2,?3,?4,?5) ON CONFLICT DO NOTHING", params![encode(path),item.page,item.text,item.note,item.color]).map_err(|e|e.to_string())?;
+            if changed == 0 {
+                return tx.commit().map_err(|e| e.to_string());
+            }
+            tx.last_insert_rowid()
+        } else {
+            let changed = tx
+                .execute(
+                    "UPDATE annotations SET note=?1,color=?2 WHERE id=?3 AND path=?4",
+                    params![item.note, item.color, item.id, encode(path)],
+                )
+                .map_err(|e| e.to_string())?;
+            if changed != 1 {
+                return Err("Annotation no longer exists.".into());
+            }
+            tx.commit().map_err(|e| e.to_string())?;
+            return Ok(());
+        };
+        for (index, b) in item.bounds.iter().enumerate() {
+            tx.execute(
+                "INSERT INTO annotation_bounds VALUES(?1,?2,?3,?4,?5,?6)",
+                params![id, index as i64, b[0], b[1], b[2], b[3]],
+            )
+            .map_err(|e| e.to_string())?;
+        }
+        tx.commit().map_err(|e| e.to_string())
+    }
+    fn delete_annotation(&self, path: &Path, id: i64) -> Result<(), String> {
+        self.conn
+            .execute(
+                "DELETE FROM annotations WHERE path=?1 AND id=?2",
+                params![encode(path), id],
+            )
+            .map(|_| ())
+            .map_err(|e| e.to_string())
+    }
     fn snapshot(&self) -> Result<crate::domain::settings::Snapshot, String> {
         Store::snapshot(self)
     }
@@ -388,5 +474,83 @@ mod durability_tests {
                 .unwrap(),
             99
         );
+    }
+}
+
+#[cfg(test)]
+mod annotation_tests {
+    use super::*;
+    use crate::{domain::annotation::Annotation, services::ports::LibraryRepository};
+
+    #[test]
+    fn annotations_survive_reopen_and_are_scoped_to_document() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = dir.path().join("annotations.db");
+        let a = dir.path().join("a.pdf");
+        let b = dir.path().join("b.pdf");
+        let mut store = Store::open(&db).unwrap();
+        let highlight = Annotation {
+            id: 0,
+            page: 2,
+            text: "Text & Unicode বাংলা".into(),
+            note: "First note\nSecond line".into(),
+            color: Some(3),
+            bounds: vec![[0.1, 0.2, 0.4, 0.3], [0.4, 0.2, 0.6, 0.3]],
+        };
+        store.save_annotation(&a, &highlight).unwrap();
+        let bookmark = Annotation {
+            id: 0,
+            page: 2,
+            text: String::new(),
+            note: String::new(),
+            color: None,
+            bounds: vec![],
+        };
+        store.save_annotation(&a, &bookmark).unwrap();
+        store.save_annotation(&a, &bookmark).unwrap();
+        drop(store);
+        let mut store = Store::open(&db).unwrap();
+        let items = store.annotations(&a).unwrap();
+        assert_eq!(items.len(), 2);
+        assert_eq!(items[0].bounds, highlight.bounds);
+        assert_eq!(items[0].note, highlight.note);
+        assert!(store.annotations(&b).unwrap().is_empty());
+        let mut updated = items[0].clone();
+        updated.note = "Changed".into();
+        updated.color = Some(1);
+        assert!(store.save_annotation(&b, &updated).is_err());
+        store.save_annotation(&a, &updated).unwrap();
+        store.delete_annotation(&b, updated.id).unwrap();
+        assert_eq!(store.annotations(&a).unwrap()[0], updated);
+        updated.note.clear();
+        store.save_annotation(&a, &updated).unwrap();
+        assert!(store.annotations(&a).unwrap()[0].note.is_empty());
+        store.delete_annotation(&a, updated.id).unwrap();
+        assert_eq!(store.annotations(&a).unwrap().len(), 1);
+        assert_eq!(
+            store
+                .conn
+                .query_row("SELECT count(*) FROM annotation_bounds", [], |r| r
+                    .get::<_, u32>(0))
+                .unwrap(),
+            0
+        );
+    }
+
+    #[test]
+    fn failed_highlight_creation_is_atomic() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut store = Store::open(&dir.path().join("db")).unwrap();
+        store.conn.execute_batch("CREATE TRIGGER refuse_bounds BEFORE INSERT ON annotation_bounds BEGIN SELECT RAISE(FAIL,'injected failure'); END;").unwrap();
+        let item = Annotation {
+            id: 0,
+            page: 1,
+            text: "hello".into(),
+            note: String::new(),
+            color: Some(0),
+            bounds: vec![[0.1, 0.2, 0.3, 0.4]],
+        };
+        assert!(store.save_annotation(Path::new("a.pdf"), &item).is_err());
+        assert!(store.annotations(Path::new("a.pdf")).unwrap().is_empty());
     }
 }

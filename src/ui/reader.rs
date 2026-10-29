@@ -9,6 +9,13 @@ impl Eder {
             });
             return;
         }
+        if !ctx.wants_keyboard_input()
+            && ctx.input(|i| i.events.iter().any(|e| matches!(e, egui::Event::Copy)))
+        {
+            if let Some(text) = self.ui.annotations.selected_text(self.app.reader.as_ref()) {
+                ctx.copy_text(text);
+            }
+        }
         if !ctx.input(|input| input.viewport().fullscreen.unwrap_or(false)) {
             egui::TopBottomPanel::top("reader_toolbar")
                 .frame(
@@ -81,6 +88,7 @@ impl Eder {
                         {
                             self.save_reading_position();
                         }
+                        self.annotation_tools(ui);
                         let mut dark = self.app.state.dark;
                         if ui.checkbox(&mut dark, "Dark pages").changed() {
                             self.send(Task::Dark(dark));
@@ -101,6 +109,7 @@ impl Eder {
         if self.app.reader.is_none() {
             return;
         }
+        self.annotation_panel(ctx);
         let mut internal_jump = None;
         egui::CentralPanel::default()
             .frame(
@@ -147,6 +156,7 @@ impl Eder {
                             ui.horizontal(|ui| {
                                 ui.add_space(((ui.available_width() - size.x) / 2.0).max(0.0));
                                 let image = ui.add(egui::Image::new(t).fit_to_exact_size(size));
+                                super::annotations::text_overlay(ui,image.rect,r.page,r.text.get(&r.page).map(Vec::as_slice).unwrap_or_default(),&r.annotations,&mut self.ui.annotations.selection);
                                 if let Some(links) = r.links.get(&r.page) {
                                     internal_jump = clicked_pdf_link(ui, image.rect, r.page, links);
                                 }
@@ -235,6 +245,18 @@ impl Eder {
                     let image = ui.put(
                         rect,
                         egui::Image::new(&texture).fit_to_exact_size(rect.size()),
+                    );
+                    super::annotations::text_overlay(
+                        ui,
+                        image.rect,
+                        page,
+                        reader
+                            .text
+                            .get(&page)
+                            .map(Vec::as_slice)
+                            .unwrap_or_default(),
+                        &reader.annotations,
+                        &mut self.ui.annotations.selection,
                     );
                     if let Some(links) = reader.links.get(&page) {
                         if let Some(target) = clicked_pdf_link(ui, image.rect, page, links) {

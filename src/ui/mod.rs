@@ -7,6 +7,7 @@ use eframe::egui::{self, Color32, RichText, TextureHandle, Vec2};
 use std::{path::PathBuf, sync::atomic::Ordering};
 use theme::*;
 
+mod annotations;
 mod library;
 mod navigation;
 mod reader;

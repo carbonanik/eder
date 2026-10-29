@@ -1,6 +1,6 @@
 # Implemented architecture
 
-Eder is one Rust package with an egui desktop adapter, a headless application controller, synchronous services, supervised workers, and local infrastructure. This implements the structure proposed in [the architecture plan](architecture-plan.md). Search indexing, annotations, tabs, and replacing Poppler are separate feature work.
+Eder is one Rust package with an egui desktop adapter, a headless application controller, synchronous services, supervised workers, and local infrastructure. This implements the structure proposed in [the architecture plan](architecture-plan.md). Search indexing, tabs, and replacing Poppler are separate feature work.
 
 ## Source map and dependencies
 
@@ -75,7 +75,7 @@ The Poppler XML backend can report zero-width text bounds for rotated links. Ede
 
 Existing data stays in the `com / Folio / Folio` application directory, with `folio.sqlite3` and native path encoding preserved. Preferences stay in SQLite. Favorites, MRU and existing reading positions migrate in place. The storage worker holds an OS file lock for the data directory, visibly refusing a second instance; the lock is released automatically after process exit/crash.
 
-Schema version 2 is applied transactionally. It retains legacy row-stride fractions under anchor version 0 and adds versioned content anchors, zoom and normalized horizontal pan. New anchors use version 1. The first real reader viewport converts a legacy anchor using the former fixed-row geometry; subsequent successful saves write content coordinates. New versions of the schema are refused rather than downgraded.
+Schema version 3 is applied transactionally. It retains legacy row-stride fractions under anchor version 0 and adds versioned content anchors, zoom and normalized horizontal pan. New anchors use version 1. The first real reader viewport converts a legacy anchor using the former fixed-row geometry; subsequent successful saves write content coordinates. New versions of the schema are refused rather than downgraded.
 
 Normal close freezes actions, cancels speculative work and imports, drains accepted storage commands, waits for imports to finish cleanup, and commits the final position together with recovery-target removal. The UI then signals the supervisor to stop, wake and join every worker off the frame thread. Only after those joins does it receive the final close acknowledgment, so Poppler children are reaped before normal application exit.
 
@@ -96,3 +96,9 @@ cargo run --locked --release --example profile
 ```
 
 Poppler-dependent tests require its installed executables. The profile example measures scan/sort, geometry preparation, viewport lookup and cold/warm raster paths. See [architecture validation](architecture-validation.md) for this implementation's actual checks and measurements. A native desktop smoke pass remains necessary before release.
+
+## Text selection and annotations
+
+The metadata worker extracts normalized word boxes with `pdftotext -bbox` alongside internal links. Text metadata shares the bounded metadata cache and cancellation generation. Both reader modes project the same word boxes onto their displayed page rectangle. UI state owns temporary selection and note drafts; application reader state owns loaded words and durable annotation snapshots.
+
+`domain::annotation` defines plain text, bounds, colors, validation, and Markdown export. The persistence service uses repository ports for annotation queries and mutations. Storage commands execute on the ordered I/O worker and return document-correlated snapshots after commit. Schema version 3 stores annotations and ordered word rectangles in separate tables; highlight creation is transactional, bookmark pages are unique per document, and deletion cascades to rectangles. Notes and colors can be updated without changing the original text anchor. Export reads committed annotations on the I/O worker after the native save dialog returns. The original PDF is never rewritten. Annotation identity follows the canonical document path, as existing reading positions do; moving or replacing files does not re-anchor annotations.

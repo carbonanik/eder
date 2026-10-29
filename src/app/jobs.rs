@@ -11,6 +11,7 @@ pub struct PageResult<P = Pixels> {
     pub result: Result<P, crate::domain::error::AppError>,
 }
 pub struct LinkJob {
+    pub geometry: crate::domain::document::PageGeometry,
     pub path: PathBuf,
     pub page: u32,
     pub total: u32,
@@ -20,6 +21,7 @@ pub struct LinkResult {
     pub id: u64,
     pub page: u32,
     pub links: Vec<PdfLink>,
+    pub text: Result<Vec<crate::domain::annotation::TextWord>, crate::domain::error::AppError>,
 }
 pub struct ThumbJob {
     pub path: PathBuf,

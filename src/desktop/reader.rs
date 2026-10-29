@@ -154,7 +154,16 @@ impl Eder {
         if r.links.contains_key(&page) || !r.link_pending.insert(page) {
             return;
         }
+        let Some(geometry) = page
+            .checked_sub(1)
+            .and_then(|i| r.geometry.get(i as usize))
+            .copied()
+        else {
+            r.link_pending.remove(&page);
+            return;
+        };
         let job = LinkJob {
+            geometry,
             path: r.path.clone(),
             page,
             total: r.total,

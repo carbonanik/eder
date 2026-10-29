@@ -1,3 +1,4 @@
+pub mod annotation;
 pub mod document;
 pub mod error;
 pub mod pixels;

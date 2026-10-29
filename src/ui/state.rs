@@ -4,6 +4,7 @@ use std::{
     sync::mpsc::Receiver,
 };
 pub(crate) struct UiState {
+    pub(crate) annotations: super::annotations::AnnotationUi,
     pub(crate) logo: TextureHandle,
     pub(crate) search_query_cached: String,
     pub(crate) search_indices: Vec<usize>,
@@ -25,6 +26,7 @@ pub(crate) struct UiState {
 impl UiState {
     pub fn new(logo: TextureHandle) -> Self {
         Self {
+            annotations: Default::default(),
             logo,
             search_query_cached: String::new(),
             search_indices: Vec::new(),

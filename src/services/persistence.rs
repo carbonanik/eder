@@ -8,6 +8,23 @@ impl<R: LibraryRepository> PersistenceService<R> {
     pub fn new(repository: R) -> Self {
         Self { repository }
     }
+    pub fn annotations(
+        &self,
+        path: &Path,
+    ) -> Result<Vec<crate::domain::annotation::Annotation>, String> {
+        self.repository.annotations(path)
+    }
+    pub fn save_annotation(
+        &mut self,
+        path: &Path,
+        item: &crate::domain::annotation::Annotation,
+    ) -> Result<(), String> {
+        item.validate()?;
+        self.repository.save_annotation(path, item)
+    }
+    pub fn delete_annotation(&self, path: &Path, id: i64) -> Result<(), String> {
+        self.repository.delete_annotation(path, id)
+    }
     pub fn snapshot(&self) -> Result<crate::domain::settings::Snapshot, String> {
         self.repository.snapshot()
     }

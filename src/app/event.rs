@@ -2,6 +2,7 @@ use crate::domain::{document::Entry, reading_position::ReadingPosition, settings
 use std::path::PathBuf;
 
 pub enum Event {
+    Annotations(PathBuf, Vec<crate::domain::annotation::Annotation>),
     Snapshot(Snapshot),
     Rows(u64, Result<Vec<Entry>, String>),
     Collections(u64, Vec<Entry>),
