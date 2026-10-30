@@ -1,3 +1,4 @@
+use super::reader::{reader_palette, reader_style};
 use super::*;
 use crate::domain::annotation::{Annotation, TextWord};
 
@@ -5,6 +6,8 @@ use crate::domain::annotation::{Annotation, TextWord};
 pub(crate) struct AnnotationUi {
     pub open: bool,
     pub pages_open: bool,
+    pub navigation_tab: usize,
+    pub page_query: String,
     pub pan: bool,
     pub thumbnails: std::collections::HashMap<u32, Option<TextureHandle>>,
     pub thumbnail_pending: std::collections::HashSet<u32>,
@@ -172,10 +175,29 @@ impl Eder {
             .on_hover_text("Drag the page to move around");
         ui.selectable_value(&mut self.ui.annotations.pan, false, "Text")
             .on_hover_text("Drag over text to select, copy, highlight or annotate");
-        if ui
-            .button(if bookmark.is_some() { "★" } else { "☆" })
-            .on_hover_text("Toggle bookmark for this page")
-            .clicked()
+        let colors = reader_palette(ui.visuals());
+        if icon_label_button(
+            ui,
+            UiIcon::Bookmark,
+            "",
+            IconLabelStyle {
+                size: Vec2::splat(32.0),
+                fill: if bookmark.is_some() {
+                    colors.sage
+                } else {
+                    Color32::TRANSPARENT
+                },
+                color: if bookmark.is_some() {
+                    colors.teal
+                } else {
+                    colors.ink
+                },
+                text_size: 13.0,
+                rounding: 6.0,
+            },
+        )
+        .on_hover_text("Toggle bookmark for this page")
+        .clicked()
         {
             let task = if let Some(id) = bookmark {
                 Task::DeleteAnnotation(path.clone(), id)
@@ -220,9 +242,10 @@ impl Eder {
                         "Highlight selected text in {}",
                         name.to_lowercase()
                     ));
-                ui.painter().circle_filled(
-                    response.rect.center(),
-                    9.0,
+                paint_icon(
+                    ui.painter(),
+                    response.rect.shrink(5.0),
+                    UiIcon::Annotate,
                     color(index as u8).to_opaque(),
                 );
                 if response.clicked() {
@@ -235,7 +258,21 @@ impl Eder {
                     ));
                 }
             }
-            if ui.button("Add note").clicked() {
+            let colors = reader_palette(ui.visuals());
+            if icon_label_button(
+                ui,
+                UiIcon::Note,
+                "Add note",
+                IconLabelStyle {
+                    size: Vec2::new(96.0, 32.0),
+                    fill: colors.light,
+                    color: colors.ink,
+                    text_size: 13.0,
+                    rounding: 6.0,
+                },
+            )
+            .clicked()
+            {
                 self.ui.annotations.editing = Some(item);
             }
         }
@@ -265,13 +302,30 @@ impl Eder {
         if self.ui.annotations.open {
             let max_width = (ctx.available_rect().width() - 80.0).clamp(200.0, 420.0);
             egui::SidePanel::right("annotations")
-                .default_width(310.0_f32.min(max_width))
+                .default_width(300.0_f32.min(max_width))
+                .frame(
+                    egui::Frame::none()
+                        .fill(reader_palette(&ctx.style().visuals).paper)
+                        .inner_margin(14.0),
+                )
                 .width_range(200.0..=max_width)
                 .resizable(true)
                 .show(ctx, |ui| {
-                    ui.spacing_mut().item_spacing = Vec2::new(6.0, 8.0);
+                    reader_style(ui);
+                    ui.spacing_mut().item_spacing = Vec2::new(8.0, 12.0);
                     ui.horizontal(|ui| {
-                        ui.heading("Annotations");
+                        if ui
+                            .selectable_label(self.ui.annotations.filter != 3, "Annotations")
+                            .clicked()
+                        {
+                            self.ui.annotations.filter = 0;
+                        }
+                        if ui
+                            .selectable_label(self.ui.annotations.filter == 3, "Notes")
+                            .clicked()
+                        {
+                            self.ui.annotations.filter = 3;
+                        }
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                             if ui
                                 .button("×")
@@ -283,11 +337,26 @@ impl Eder {
                         });
                     });
                     ui.horizontal_wrapped(|ui| {
-                        for (index, label) in ["All", "Bookmarks", "Highlights", "Notes"]
-                            .iter()
-                            .enumerate()
-                        {
-                            ui.selectable_value(&mut self.ui.annotations.filter, index, *label);
+                        for (index, label) in [(0, "All"), (2, "Highlights"), (3, "Notes")] {
+                            let count = self
+                                .app
+                                .reader
+                                .as_ref()
+                                .unwrap()
+                                .annotations
+                                .iter()
+                                .filter(|a| match index {
+                                    1 => a.color.is_none(),
+                                    2 => a.color.is_some(),
+                                    3 => !a.note.is_empty(),
+                                    _ => true,
+                                })
+                                .count();
+                            ui.selectable_value(
+                                &mut self.ui.annotations.filter,
+                                index,
+                                format!("{label} {count}"),
+                            );
                         }
                     });
                     if ui.button("Export as Markdown…").clicked()
@@ -326,11 +395,23 @@ impl Eder {
                     egui::ScrollArea::vertical().show(ui, |ui| {
                         for item in items {
                             let mut navigate = false;
-                            let colors = palette(ui.visuals());
+                            let colors = reader_palette(ui.visuals());
+                            let current = self
+                                .app
+                                .reader
+                                .as_ref()
+                                .is_some_and(|r| r.page == item.page);
                             egui::Frame::none()
-                                .fill(colors.light)
-                                .stroke(egui::Stroke::new(1.0_f32, colors.hairline))
-                                .rounding(6.0)
+                                .fill(if current { colors.sage } else { colors.light })
+                                .stroke(egui::Stroke::new(
+                                    1.0_f32,
+                                    if current {
+                                        colors.teal
+                                    } else {
+                                        colors.hairline
+                                    },
+                                ))
+                                .rounding(9.0)
                                 .inner_margin(12.0)
                                 .show(ui, |ui| {
                                     ui.set_width(ui.available_width());
@@ -344,21 +425,11 @@ impl Eder {
                                             egui::Sense::hover(),
                                         );
                                         ui.painter().circle_filled(dot.center(), 5.0, tint);
-                                        let kind = if item.color.is_none() {
-                                            "Bookmark"
-                                        } else if !item.note.is_empty() {
-                                            "Note"
-                                        } else {
-                                            "Highlight"
-                                        };
                                         navigate |= ui
                                             .add(
                                                 egui::Label::new(
-                                                    RichText::new(format!(
-                                                        "{kind} · Page {}",
-                                                        item.page
-                                                    ))
-                                                    .size(13.0),
+                                                    RichText::new(format!("Page {}", item.page))
+                                                        .size(13.0),
                                                 )
                                                 .sense(egui::Sense::click()),
                                             )

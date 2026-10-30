@@ -25,16 +25,16 @@ impl Palette {
     pub fn new(dark: bool) -> Self {
         if dark {
             Self {
-                paper: Color32::from_rgb(18, 29, 34),
+                paper: Color32::from_rgb(15, 25, 33),
                 ink: Color32::from_rgb(235, 233, 223),
                 deep: Color32::from_rgb(42, 90, 94),
                 teal: Color32::from_rgb(90, 205, 190),
                 muted: Color32::from_rgb(162, 180, 182),
-                sage: Color32::from_rgb(33, 51, 56),
-                light: Color32::from_rgb(25, 39, 45),
-                hairline: Color32::from_rgb(62, 83, 87),
-                hover: Color32::from_rgb(44, 69, 73),
-                nav_hover: Color32::from_rgb(30, 46, 52),
+                sage: Color32::from_rgb(25, 45, 65),
+                light: Color32::from_rgb(22, 34, 44),
+                hairline: Color32::from_rgb(37, 54, 67),
+                hover: Color32::from_rgb(31, 48, 63),
+                nav_hover: Color32::from_rgb(22, 34, 44),
                 on_primary: Color32::from_rgb(250, 249, 245),
                 amber: Color32::from_rgb(244, 173, 104),
                 subtle_fill: Color32::from_rgb(32, 48, 58),

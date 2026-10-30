@@ -38,11 +38,11 @@ impl Eder {
             .frame(
                 egui::Frame::none()
                     .fill(if self.app.state.dark {
-                        Color32::from_rgb(24, 27, 31)
+                        Color32::from_rgb(14, 23, 30)
                     } else {
-                        palette(&ctx.style().visuals).sage
+                        reader_palette(&ctx.style().visuals).sage
                     })
-                    .inner_margin(10.0),
+                    .inner_margin(16.0),
             )
             .show(ctx, |ui| {
                 if self.app.state.continuous_scroll {
@@ -101,29 +101,15 @@ impl Eder {
         egui::TopBottomPanel::top("reader_toolbar")
             .frame(
                 egui::Frame::none()
-                    .fill(palette(&ctx.style().visuals).paper)
+                    .fill(reader_palette(&ctx.style().visuals).paper)
                     .inner_margin(egui::Margin::symmetric(12.0, 8.0)),
             )
             .show(ctx, |ui| {
-                ui.spacing_mut().item_spacing = Vec2::new(6.0, 6.0);
-                ui.spacing_mut().button_padding = Vec2::new(9.0, 7.0);
+                reader_style(ui);
+                ui.spacing_mut().item_spacing = Vec2::new(8.0, 8.0);
+                ui.spacing_mut().button_padding = Vec2::new(10.0, 6.0);
                 ui.horizontal(|ui| {
                     ui.add(egui::Image::new(&self.ui.logo).fit_to_exact_size(Vec2::splat(24.0)));
-                    let back = icon_label_button(
-                        ui,
-                        UiIcon::ArrowLeft,
-                        "Back",
-                        IconLabelStyle {
-                            size: Vec2::new(80.0, 28.0),
-                            fill: ui.visuals().widgets.inactive.bg_fill,
-                            color: ui.visuals().text_color(),
-                            text_size: 14.0,
-                            rounding: 4.0,
-                        },
-                    );
-                    if back.clicked() {
-                        self.back();
-                    }
                     let title = self
                         .app
                         .reader
@@ -136,12 +122,16 @@ impl Eder {
                                 .into_owned()
                         })
                         .unwrap_or_default();
-                    let title_width = (ui.available_width() - 80.0).max(20.0);
+                    let title_width = (ui.available_width() - 110.0).max(20.0);
                     ui.add_sized(
                         [title_width, 28.0],
-                        egui::Label::new(RichText::new(&title).strong()).truncate(),
+                        egui::Label::new(RichText::new(&title).size(14.0)).truncate(),
                     )
                     .on_hover_text(title);
+                    let mut dark_theme = self.app.state.dark_theme;
+                    if theme_switch(ui, &mut dark_theme).changed() {
+                        self.send(Task::DarkTheme(dark_theme));
+                    }
                     ui.menu_button("⚙", |ui| {
                         ui.label("Reader settings");
                         let mut continuous = self.app.state.continuous_scroll;
@@ -169,34 +159,70 @@ impl Eder {
                     return;
                 }
                 // Groups wrap as units on narrow windows, keeping navigation together.
-                ui.horizontal_wrapped(|ui| {
-                    toolbar_group(ui, |ui| self.reader_navigation_tools(ui));
-                    toolbar_group(ui, |ui| self.reader_zoom_tools(ui));
-                    toolbar_group(ui, |ui| self.annotation_tools(ui));
-                    toolbar_group(ui, |ui| {
-                        let mut dark = self.app.state.dark;
-                        if ui
-                            .checkbox(&mut dark, "Dark pages")
-                            .on_hover_text("Invert PDF page colors")
-                            .changed()
-                        {
-                            self.send(Task::Dark(dark));
-                        }
-                        let fullscreen = ui.input(|i| i.viewport().fullscreen.unwrap_or(false));
-                        if ui
-                            .button(if fullscreen {
-                                "Exit fullscreen"
-                            } else {
-                                "Fullscreen"
-                            })
-                            .on_hover_text("Toggle fullscreen (F11)")
+                ui.with_layout(
+                    egui::Layout::left_to_right(egui::Align::Min).with_main_wrap(true),
+                    |ui| {
+                        toolbar_group(ui, |ui| {
+                            let colors = reader_palette(ui.visuals());
+                            if icon_label_button(
+                                ui,
+                                UiIcon::ArrowLeft,
+                                "Back",
+                                IconLabelStyle {
+                                    size: Vec2::new(82.0, 32.0),
+                                    fill: colors.light,
+                                    color: colors.ink,
+                                    text_size: 13.0,
+                                    rounding: 6.0,
+                                },
+                            )
                             .clicked()
-                        {
-                            ui.ctx()
-                                .send_viewport_cmd(egui::ViewportCommand::Fullscreen(!fullscreen));
-                        }
-                    });
-                });
+                            {
+                                self.back();
+                            }
+                        });
+                        toolbar_group(ui, |ui| self.reader_navigation_tools(ui));
+                        toolbar_group(ui, |ui| self.reader_zoom_tools(ui));
+                        toolbar_group(ui, |ui| self.annotation_tools(ui));
+                        toolbar_group(ui, |ui| {
+                            if ui
+                                .selectable_label(self.ui.annotations.pages_open, "Pages")
+                                .on_hover_text("Toggle page navigation")
+                                .clicked()
+                            {
+                                self.ui.annotations.pages_open = !self.ui.annotations.pages_open;
+                            }
+                            if ui
+                                .selectable_label(self.ui.annotations.open, "Annotations")
+                                .clicked()
+                            {
+                                self.ui.annotations.open = !self.ui.annotations.open;
+                            }
+                            ui.menu_button("•••", |ui| {
+                                let mut dark = self.app.state.dark;
+                                if ui.checkbox(&mut dark, "Dark pages").changed() {
+                                    self.send(Task::Dark(dark));
+                                }
+                                let fullscreen =
+                                    ui.input(|i| i.viewport().fullscreen.unwrap_or(false));
+                                if ui
+                                    .button(if fullscreen {
+                                        "Exit fullscreen"
+                                    } else {
+                                        "Fullscreen"
+                                    })
+                                    .clicked()
+                                {
+                                    ui.ctx()
+                                        .send_viewport_cmd(egui::ViewportCommand::Fullscreen(
+                                            !fullscreen,
+                                        ));
+                                    ui.close_menu();
+                                }
+                            });
+                        });
+                    },
+                );
                 if self.ui.annotations.selection.is_some() && !self.ui.annotations.pan {
                     ui.horizontal_wrapped(|ui| {
                         ui.weak("Selected text");
@@ -226,11 +252,7 @@ impl Eder {
         }
         let mut jump = page;
         if ui
-            .add(
-                egui::DragValue::new(&mut jump)
-                    .range(1..=total)
-                    .prefix("Page "),
-            )
+            .add(egui::DragValue::new(&mut jump).range(1..=total).speed(0.15))
             .on_hover_text("Type a page number or drag to navigate")
             .changed()
         {
@@ -313,167 +335,184 @@ impl Eder {
     }
 
     fn reader_rail(&mut self, ctx: &egui::Context) {
-        egui::SidePanel::left("reader_rail")
-            .exact_width(48.0)
-            .resizable(false)
-            .frame(
-                egui::Frame::none()
-                    .fill(palette(&ctx.style().visuals).paper)
-                    .inner_margin(egui::Margin::symmetric(5.0, 10.0)),
-            )
-            .show(ctx, |ui| {
-                ui.spacing_mut().item_spacing.y = 8.0;
-                for (filter, icon, label) in [
-                    (4, UiIcon::Grid, "Pages"),
-                    (1, UiIcon::Bookmark, "Bookmarks"),
-                    (0, UiIcon::Annotate, "Annotations"),
-                    (3, UiIcon::Note, "Notes"),
-                ] {
-                    let active = if filter == 4 {
-                        self.ui.annotations.pages_open
-                    } else {
-                        self.ui.annotations.open && self.ui.annotations.filter == filter
-                    };
-                    let colors = palette(ui.visuals());
-                    if icon_label_button(
-                        ui,
-                        icon,
-                        "",
-                        IconLabelStyle {
-                            size: Vec2::splat(36.0),
-                            fill: if active {
-                                colors.deep
-                            } else {
-                                Color32::TRANSPARENT
-                            },
-                            color: if active { colors.teal } else { colors.muted },
-                            text_size: 14.0,
-                            rounding: 6.0,
-                        },
-                    )
-                    .on_hover_text(label)
-                    .clicked()
-                    {
-                        if filter == 4 {
-                            self.ui.annotations.pages_open = !active;
-                            if !active && ctx.screen_rect().width() < 850.0 {
-                                self.ui.annotations.open = false;
-                            }
-                        } else {
-                            self.ui.annotations.open = !active;
-                            self.ui.annotations.filter = filter;
-                            if !active && ctx.screen_rect().width() < 850.0 {
-                                self.ui.annotations.pages_open = false;
-                            }
-                        }
-                    }
-                }
-                ui.add_enabled(false, egui::Button::new("≡").min_size(Vec2::splat(36.0)))
-                    .on_disabled_hover_text(
-                        "Document outline is not available with this PDF backend",
-                    );
-            });
-        // Small windows display one expanded panel at a time.
+        // Compact windows keep one sidebar open so the page retains usable space.
         if ctx.screen_rect().width() < 850.0 && self.ui.annotations.open {
             self.ui.annotations.pages_open = false;
         }
-        if self.ui.annotations.pages_open {
-            egui::SidePanel::left("reader_pages")
-                .default_width(172.0)
-                .width_range(140.0..=240.0)
-                .show(ctx, |ui| {
-                    ui.horizontal(|ui| {
-                        ui.heading("Pages");
-                        if ui.small_button("×").on_hover_text("Close pages").clicked() {
-                            self.ui.annotations.pages_open = false;
+        if !self.ui.annotations.pages_open {
+            return;
+        }
+        egui::SidePanel::left("reader_pages")
+            .default_width(240.0)
+            .width_range(180.0..=290.0)
+            .frame(
+                egui::Frame::none()
+                    .fill(reader_palette(&ctx.style().visuals).paper)
+                    .inner_margin(14.0),
+            )
+            .show(ctx, |ui| {
+                reader_style(ui);
+                ui.horizontal(|ui| {
+                    ui.selectable_value(&mut self.ui.annotations.navigation_tab, 0, "Pages");
+                    ui.selectable_value(&mut self.ui.annotations.navigation_tab, 1, "Bookmarks");
+                    if ui
+                        .small_button("×")
+                        .on_hover_text("Close navigation")
+                        .clicked()
+                    {
+                        self.ui.annotations.pages_open = false;
+                    }
+                });
+                ui.add_space(4.0);
+                ui.separator();
+                ui.add_space(6.0);
+                if self.ui.annotations.navigation_tab == 1 {
+                    let bookmarks: Vec<_> = self
+                        .app
+                        .reader
+                        .as_ref()
+                        .unwrap()
+                        .annotations
+                        .iter()
+                        .filter(|a| a.color.is_none())
+                        .map(|a| a.page)
+                        .collect();
+                    if bookmarks.is_empty() {
+                        ui.weak("No bookmarks yet.");
+                    }
+                    egui::ScrollArea::vertical().show(ui, |ui| {
+                        for page in bookmarks {
+                            if ui
+                                .selectable_label(
+                                    self.app.reader.as_ref().unwrap().page == page,
+                                    format!("Page {page}"),
+                                )
+                                .clicked()
+                            {
+                                self.turn(page);
+                            }
                         }
                     });
-                    ui.separator();
-                    let (page, total) = {
-                        let r = self.app.reader.as_ref().unwrap();
-                        (r.page, r.total)
-                    };
-                    // Virtualize long documents; use cached page previews where available.
-                    egui::ScrollArea::vertical()
-                        .id_salt("page_navigation")
-                        .show_rows(ui, 124.0, total as usize, |ui, range| {
-                            for index in range {
-                                let target = index as u32 + 1;
-                                let preview = self
-                                    .ui
-                                    .annotations
-                                    .thumbnails
-                                    .get(&target)
-                                    .and_then(Clone::clone);
-                                if !self.ui.annotations.thumbnails.contains_key(&target)
-                                    && self.ui.annotations.thumbnail_pending.len() < 4
-                                    && !self.ui.annotations.thumbnail_pending.contains(&target)
-                                {
-                                    let job = ThumbJob {
-                                        page: Some(target),
-                                        path: self.app.reader.as_ref().unwrap().path.clone(),
-                                        id: self.runtime.thumb_gen.load(Ordering::Acquire),
-                                    };
-                                    if self.runtime.thumb_tx.try_send(job).is_ok() {
-                                        self.ui.annotations.thumbnail_pending.insert(target);
+                    return;
+                }
+                ui.add(
+                    egui::TextEdit::singleline(&mut self.ui.annotations.page_query)
+                        .hint_text("Find page number…")
+                        .desired_width(f32::INFINITY),
+                );
+                ui.add_space(12.0);
+                let (page, total) = {
+                    let r = self.app.reader.as_ref().unwrap();
+                    (r.page, r.total)
+                };
+                let query = self.ui.annotations.page_query.trim();
+                let targets: Vec<u32> = (1..=total)
+                    .filter(|p| query.is_empty() || p.to_string().contains(query))
+                    .collect();
+                let columns = if ui.available_width() >= 190.0 { 2 } else { 1 };
+                let cell_width =
+                    (ui.available_width() - 10.0 * (columns - 1) as f32 - 8.0) / columns as f32;
+                egui::ScrollArea::vertical()
+                    .id_salt("page_navigation")
+                    .auto_shrink([false, false])
+                    .show_rows(ui, 146.0, targets.len().div_ceil(columns), |ui, range| {
+                        for row in range {
+                            ui.horizontal(|ui| {
+                                ui.spacing_mut().item_spacing.x = 10.0;
+                                for &target in targets.iter().skip(row * columns).take(columns) {
+                                    let preview = self
+                                        .ui
+                                        .annotations
+                                        .thumbnails
+                                        .get(&target)
+                                        .and_then(Clone::clone);
+                                    if !self.ui.annotations.thumbnails.contains_key(&target)
+                                        && self.ui.annotations.thumbnail_pending.len() < 4
+                                        && !self.ui.annotations.thumbnail_pending.contains(&target)
+                                    {
+                                        let job = ThumbJob {
+                                            page: Some(target),
+                                            path: self.app.reader.as_ref().unwrap().path.clone(),
+                                            id: self.runtime.thumb_gen.load(Ordering::Acquire),
+                                        };
+                                        if self.runtime.thumb_tx.try_send(job).is_ok() {
+                                            self.ui.annotations.thumbnail_pending.insert(target);
+                                        }
+                                    }
+                                    let colors = reader_palette(ui.visuals());
+                                    let selected = target == page;
+                                    let response = egui::Frame::none()
+                                        .fill(if selected {
+                                            colors.sage
+                                        } else {
+                                            Color32::TRANSPARENT
+                                        })
+                                        .stroke(egui::Stroke::new(
+                                            1.0_f32,
+                                            if selected {
+                                                colors.teal
+                                            } else {
+                                                Color32::TRANSPARENT
+                                            },
+                                        ))
+                                        .inner_margin(8.0)
+                                        .rounding(9.0)
+                                        .show(ui, |ui| {
+                                            ui.set_width((cell_width - 16.0).max(50.0));
+                                            ui.set_min_height(122.0);
+                                            ui.vertical_centered(|ui| {
+                                                if let Some(texture) = preview {
+                                                    let size = texture.size_vec2();
+                                                    ui.add(
+                                                        egui::Image::new(&texture)
+                                                            .fit_to_exact_size(
+                                                                size * (94.0 / size.y).min(
+                                                                    (cell_width - 24.0) / size.x,
+                                                                ),
+                                                            ),
+                                                    );
+                                                } else {
+                                                    let (rect, _) = ui.allocate_exact_size(
+                                                        Vec2::new(62.0, 94.0),
+                                                        egui::Sense::hover(),
+                                                    );
+                                                    ui.painter().rect_filled(
+                                                        rect,
+                                                        2.0,
+                                                        colors.light,
+                                                    );
+                                                    ui.painter().text(
+                                                        rect.center(),
+                                                        egui::Align2::CENTER_CENTER,
+                                                        target.to_string(),
+                                                        egui::FontId::proportional(16.0),
+                                                        colors.muted,
+                                                    );
+                                                }
+                                                ui.add_space(4.0);
+                                                ui.label(
+                                                    RichText::new(format!("Page {target}"))
+                                                        .size(12.0),
+                                                );
+                                            });
+                                        })
+                                        .response;
+                                    if ui
+                                        .interact(
+                                            response.rect,
+                                            ui.id().with(target),
+                                            egui::Sense::click(),
+                                        )
+                                        .on_hover_cursor(egui::CursorIcon::PointingHand)
+                                        .clicked()
+                                    {
+                                        self.turn(target);
                                     }
                                 }
-                                let response = egui::Frame::none()
-                                    .fill(if target == page {
-                                        palette(ui.visuals()).sage
-                                    } else {
-                                        Color32::TRANSPARENT
-                                    })
-                                    .inner_margin(6.0)
-                                    .rounding(4.0)
-                                    .show(ui, |ui| {
-                                        ui.set_min_width(ui.available_width());
-                                        ui.set_min_height(112.0);
-                                        ui.vertical_centered(|ui| {
-                                            if let Some(texture) = preview {
-                                                let size = texture.size_vec2();
-                                                ui.add(
-                                                    egui::Image::new(&texture).fit_to_exact_size(
-                                                        size * (76.0 / size.y).min(100.0 / size.x),
-                                                    ),
-                                                );
-                                            } else {
-                                                let (rect, _) = ui.allocate_exact_size(
-                                                    Vec2::new(54.0, 76.0),
-                                                    egui::Sense::hover(),
-                                                );
-                                                ui.painter().rect_filled(
-                                                    rect,
-                                                    2.0,
-                                                    palette(ui.visuals()).light,
-                                                );
-                                                ui.painter().text(
-                                                    rect.center(),
-                                                    egui::Align2::CENTER_CENTER,
-                                                    target.to_string(),
-                                                    egui::FontId::proportional(18.0),
-                                                    palette(ui.visuals()).muted,
-                                                );
-                                            }
-                                            ui.label(format!("Page {target}"));
-                                        });
-                                    })
-                                    .response;
-                                if ui
-                                    .interact(
-                                        response.rect,
-                                        ui.id().with(target),
-                                        egui::Sense::click(),
-                                    )
-                                    .on_hover_text(format!("Go to page {target}"))
-                                    .clicked()
-                                {
-                                    self.turn(target);
-                                }
-                            }
-                        });
-                });
-        }
+                            });
+                        }
+                    });
+            });
     }
 
     pub(crate) fn continuous_reader_ui(&mut self, ui: &mut egui::Ui) {
@@ -594,7 +633,7 @@ impl Eder {
                     egui::Align2::CENTER_CENTER,
                     format!("Page {page}"),
                     egui::FontId::proportional(12.0),
-                    palette(ui.visuals()).muted,
+                    reader_palette(ui.visuals()).muted,
                 );
             }
         });
@@ -665,10 +704,44 @@ fn clicked_pdf_link(
 
 fn toolbar_group(ui: &mut egui::Ui, content: impl FnOnce(&mut egui::Ui)) {
     egui::Frame::none()
-        .fill(palette(ui.visuals()).light)
-        .rounding(5.0)
-        .inner_margin(egui::Margin::symmetric(5.0, 2.0))
+        .inner_margin(egui::Margin::symmetric(2.0, 0.0))
         .show(ui, |ui| {
             ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), content);
         });
+}
+
+/// Reader accents use the shared home and document surface colors.
+pub(super) fn reader_palette(visuals: &egui::Visuals) -> Palette {
+    let mut colors = palette(visuals);
+    if visuals.dark_mode {
+        colors.ink = Color32::from_rgb(230, 236, 241);
+        colors.muted = Color32::from_rgb(151, 168, 181);
+        colors.teal = Color32::from_rgb(82, 161, 250);
+    }
+    colors
+}
+
+pub(super) fn reader_style(ui: &mut egui::Ui) {
+    let colors = reader_palette(ui.visuals());
+    ui.spacing_mut().item_spacing = Vec2::new(8.0, 10.0);
+    ui.spacing_mut().button_padding = Vec2::new(10.0, 7.0);
+    ui.spacing_mut().interact_size.y = 32.0;
+    let visuals = ui.visuals_mut();
+    visuals.override_text_color = Some(colors.ink);
+    visuals.extreme_bg_color = colors.light;
+    visuals.selection.bg_fill = colors.sage;
+    visuals.selection.stroke.color = colors.teal;
+    for widget in [
+        &mut visuals.widgets.inactive,
+        &mut visuals.widgets.hovered,
+        &mut visuals.widgets.active,
+    ] {
+        widget.rounding = 6.0.into();
+        widget.bg_stroke = egui::Stroke::new(1.0_f32, colors.hairline);
+    }
+    visuals.widgets.inactive.bg_fill = colors.light;
+    visuals.widgets.inactive.weak_bg_fill = Color32::TRANSPARENT;
+    visuals.widgets.hovered.bg_fill = colors.hover;
+    visuals.widgets.active.bg_fill = colors.sage;
+    visuals.widgets.noninteractive.bg_stroke = egui::Stroke::new(1.0_f32, colors.hairline);
 }
