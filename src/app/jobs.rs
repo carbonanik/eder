@@ -24,10 +24,12 @@ pub struct LinkResult {
     pub text: Result<Vec<crate::domain::annotation::TextWord>, crate::domain::error::AppError>,
 }
 pub struct ThumbJob {
+    pub page: Option<u32>,
     pub path: PathBuf,
     pub id: u64,
 }
 pub struct ThumbResult<P = Pixels> {
+    pub page: Option<u32>,
     pub path: PathBuf,
     pub id: u64,
     pub image: Option<P>,

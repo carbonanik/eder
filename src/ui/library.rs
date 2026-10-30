@@ -20,6 +20,7 @@ impl Eder {
                     .runtime
                     .thumb_tx
                     .try_send(ThumbJob {
+                        page: None,
                         path: e.path.clone(),
                         id: self.runtime.thumb_gen.load(Ordering::Acquire),
                     })
@@ -221,6 +222,7 @@ impl Eder {
                 .runtime
                 .thumb_tx
                 .try_send(ThumbJob {
+                    page: None,
                     path: e.path.clone(),
                     id: self.runtime.thumb_gen.load(Ordering::Acquire),
                 })

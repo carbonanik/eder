@@ -44,6 +44,251 @@ fn pressed(ctx: &egui::Context, modifiers: Modifiers, key: Key) -> bool {
     })
 }
 
+impl Eder {
+    pub(crate) fn reader_scroll_delta(&self, ctx: &egui::Context) -> Vec2 {
+        if ctx.wants_keyboard_input()
+            || self.ui.shortcuts_open
+            || self.ui.dialog.is_some()
+            || self.ui.file_dialog.is_some()
+        {
+            return Vec2::ZERO;
+        }
+        let up = pressed(ctx, Modifiers::NONE, Key::ArrowUp);
+        let down = pressed(ctx, Modifiers::NONE, Key::ArrowDown);
+        Vec2::new(0.0, 60.0 * (i32::from(up) - i32::from(down)) as f32)
+    }
+
+    pub(crate) fn keyboard_shortcuts(&mut self, ctx: &egui::Context) {
+        let fullscreen = ctx.input(|i| i.viewport().fullscreen.unwrap_or(false));
+        if pressed(ctx, Modifiers::NONE, Key::F11)
+            || pressed(ctx, Modifiers::CTRL | Modifiers::MAC_CMD, Key::F)
+        {
+            ctx.send_viewport_cmd(egui::ViewportCommand::Fullscreen(!fullscreen));
+        }
+        if pressed(ctx, Modifiers::NONE, Key::F1) {
+            self.ui.shortcuts_open = !self.ui.shortcuts_open;
+        }
+        if pressed(ctx, Modifiers::NONE, Key::Escape) {
+            if self.ui.shortcuts_open {
+                self.ui.shortcuts_open = false;
+            } else if fullscreen {
+                ctx.send_viewport_cmd(egui::ViewportCommand::Fullscreen(false));
+            } else if let Some(id) = ctx.memory(|m| m.focused()) {
+                ctx.memory_mut(|m| m.surrender_focus(id));
+            } else if self.app.reader.is_some() {
+                self.back();
+            } else if self.app.view == View::Settings {
+                self.change_view(View::Library);
+            } else if !self.ui.search.is_empty() {
+                self.ui.search.clear();
+            }
+            return;
+        }
+        if self.ui.shortcuts_open || self.ui.dialog.is_some() || self.ui.file_dialog.is_some() {
+            return;
+        }
+        if pressed(ctx, Modifiers::COMMAND, Key::Q) {
+            // The regular close-request path flushes pending reading positions and settings.
+            ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+            return;
+        }
+        if self.app.reader.as_ref().is_some_and(|r| r.closing) {
+            return;
+        }
+        if pressed(ctx, Modifiers::COMMAND, Key::W) {
+            if self.app.reader.is_some() {
+                self.back();
+            } else {
+                ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+            }
+            return;
+        }
+        if self.app.reader.is_some() {
+            if pressed(ctx, Modifiers::COMMAND, Key::S) {
+                self.save_reading_position();
+            }
+            if pressed(ctx, Modifiers::COMMAND, Key::Plus)
+                || pressed(ctx, Modifiers::COMMAND, Key::Equals)
+            {
+                self.zoom_reader(0.1, false);
+            }
+            if pressed(ctx, Modifiers::COMMAND, Key::Minus) {
+                self.zoom_reader(-0.1, false);
+            }
+            if pressed(ctx, Modifiers::COMMAND, Key::Num0) {
+                self.zoom_reader(0.0, true);
+            }
+            if ctx.wants_keyboard_input() {
+                return;
+            }
+            if pressed(ctx, Modifiers::COMMAND | Modifiers::SHIFT, Key::A) {
+                self.ui.annotations.open = !self.ui.annotations.open;
+            }
+            if pressed(ctx, Modifiers::COMMAND | Modifiers::SHIFT, Key::P) {
+                self.ui.annotations.pages_open = !self.ui.annotations.pages_open;
+            }
+            let reader = self.app.reader.as_ref().unwrap();
+            let (page, total) = (reader.page, reader.total);
+            let target = if pressed(ctx, Modifiers::NONE, Key::Home) {
+                Some(1)
+            } else if pressed(ctx, Modifiers::NONE, Key::End) {
+                Some(total)
+            } else if pressed(ctx, Modifiers::NONE, Key::ArrowRight)
+                || pressed(ctx, Modifiers::NONE, Key::PageDown)
+                || pressed(ctx, Modifiers::NONE, Key::Space)
+            {
+                Some(page.saturating_add(1))
+            } else if pressed(ctx, Modifiers::NONE, Key::ArrowLeft)
+                || pressed(ctx, Modifiers::NONE, Key::PageUp)
+                || pressed(ctx, Modifiers::SHIFT, Key::Space)
+            {
+                Some(page.saturating_sub(1))
+            } else {
+                None
+            };
+            if let Some(page) = target {
+                self.turn(page);
+            }
+        } else {
+            if pressed(ctx, Modifiers::COMMAND, Key::O) {
+                self.pick_pdfs(ctx);
+            }
+            if pressed(ctx, Modifiers::COMMAND, Key::Comma) {
+                self.change_view(View::Settings);
+            }
+            for (key, view) in [
+                (Key::Num1, View::Library),
+                (Key::Num2, View::Reading),
+                (Key::Num3, View::Favorites),
+            ] {
+                if pressed(ctx, Modifiers::COMMAND, key) {
+                    self.change_view(view);
+                }
+            }
+            if pressed(ctx, Modifiers::COMMAND, Key::K) || pressed(ctx, Modifiers::COMMAND, Key::F)
+            {
+                if self.app.view == View::Settings {
+                    self.change_view(View::Library);
+                }
+                ctx.memory_mut(|m| m.request_focus(egui::Id::new("eder-search")));
+            }
+            if self.app.view != View::Settings
+                && (pressed(ctx, Modifiers::NONE, Key::F5)
+                    || pressed(ctx, Modifiers::COMMAND, Key::R))
+            {
+                self.refresh();
+            }
+        }
+    }
+
+    pub(crate) fn save_reading_position(&mut self) {
+        if let Some(reader) = &self.app.reader {
+            if self.send(Task::Position(
+                reader.path.clone(),
+                reader.reading_position(self.app.state.continuous_scroll),
+                true,
+            )) {
+                self.app.reader.as_mut().unwrap().position_changed_at = None;
+            }
+        }
+    }
+
+    pub(crate) fn zoom_reader(&mut self, delta: f32, reset: bool) {
+        if let Some(reader) = &mut self.app.reader {
+            let zoom = if reset {
+                1.0
+            } else {
+                (reader.zoom + delta).clamp(0.5, 3.0)
+            };
+            if zoom != reader.zoom {
+                let position = reader.reading_position(self.app.state.continuous_scroll);
+                reader.zoom = zoom;
+                reader.scroll_to = Some(position);
+                reader.position_changed_at = Some(Instant::now());
+            }
+        }
+    }
+
+    pub(crate) fn window_controls(&mut self, ui: &mut egui::Ui) {
+        let fullscreen = ui.input(|i| i.viewport().fullscreen.unwrap_or(false));
+        if ui
+            .small_button(if fullscreen {
+                "Exit fullscreen"
+            } else {
+                "Fullscreen"
+            })
+            .on_hover_text("Toggle fullscreen (F11; Ctrl+Command+F on macOS)")
+            .clicked()
+        {
+            ui.ctx()
+                .send_viewport_cmd(egui::ViewportCommand::Fullscreen(!fullscreen));
+        }
+        if ui
+            .small_button("Shortcuts")
+            .on_hover_text("Keyboard shortcuts (F1)")
+            .clicked()
+        {
+            self.ui.shortcuts_open = true;
+        }
+    }
+
+    pub(crate) fn shortcuts_help(&mut self, ctx: &egui::Context) {
+        let command = if cfg!(target_os = "macos") {
+            "⌘"
+        } else {
+            "Ctrl"
+        };
+        egui::Window::new("Keyboard shortcuts")
+            .open(&mut self.ui.shortcuts_open)
+            .collapsible(false)
+            .resizable(false)
+            .vscroll(true)
+            .show(ctx, |ui| {
+                egui::Grid::new("shortcut-reference")
+                    .spacing([24.0, 8.0])
+                    .show(ui, |ui| {
+                        for (keys, action) in [
+                            ("F11".into(), "Toggle fullscreen"),
+                            ("F1".into(), "Show / hide keyboard shortcuts"),
+                            (
+                                "Esc".into(),
+                                "Dismiss help / exit fullscreen / leave field / go back",
+                            ),
+                            (format!("{command}+Q"), "Quit Eder"),
+                            (format!("{command}+W"), "Close document / window"),
+                            (format!("{command}+O"), "Add PDFs (library)"),
+                            (
+                                format!("{command}+K or {command}+F"),
+                                "Search documents (library)",
+                            ),
+                            (format!("F5 or {command}+R"), "Refresh documents (library)"),
+                            (
+                                format!("{command}+1 / 2 / 3"),
+                                "Library / Currently Reading / Favorites",
+                            ),
+                            (format!("{command}+,"), "Settings (library)"),
+                            ("→ / Page Down / Space".into(), "Next page"),
+                            ("← / Page Up / Shift+Space".into(), "Previous page"),
+                            ("↑ / ↓".into(), "Scroll up / down"),
+                            ("Home / End".into(), "First / last page"),
+                            (format!("{command}+S"), "Save reading position"),
+                            (format!("{command}++ / {command}+-"), "Zoom in / out"),
+                            (format!("{command}+0"), "Reset zoom"),
+                            (format!("{command}+Shift+A"), "Show / hide annotations"),
+                            (format!("{command}+Shift+P"), "Show / hide page navigator"),
+                        ] {
+                            ui.label(egui::RichText::new(keys).strong());
+                            ui.label(action);
+                            ui.end_row();
+                        }
+                    });
+                if cfg!(target_os = "macos") {
+                    ui.label("Control+Command+F also toggles fullscreen.");
+                }
+            });
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -173,6 +418,88 @@ mod tests {
     }
 
     #[test]
+    fn reader_panels_toggle_from_shortcuts_without_turning_pages() {
+        let ctx = egui::Context::default();
+        let (mut app, _tasks) = app(&ctx);
+        for key in [Key::A, Key::P] {
+            let _ = ctx.run(
+                input(
+                    key,
+                    Modifiers::CTRL | Modifiers::COMMAND | Modifiers::SHIFT,
+                    false,
+                ),
+                |ctx| {
+                    app.keyboard_shortcuts(ctx);
+                    assert!(!ctx.input(|i| i.key_pressed(key)));
+                },
+            );
+        }
+        assert!(app.ui.annotations.open);
+        assert!(app.ui.annotations.pages_open);
+        assert_eq!(app.app.reader.as_ref().unwrap().page, 2);
+    }
+
+    #[test]
+    fn reader_layout_leaves_space_for_document_and_bounds_thumbnail_demand() {
+        for width in [360.0, 1100.0] {
+            for expanded in [false, true] {
+                let ctx = egui::Context::default();
+                let (mut app, _tasks) = app(&ctx);
+                let (thumbnails, _thumbnail_jobs) = mpsc::sync_channel(12);
+                app.runtime.thumb_tx = thumbnails;
+                app.app.state.continuous_scroll = true;
+                let reader = app.app.reader.as_mut().unwrap();
+                reader.total = 10_000;
+                reader
+                    .annotations
+                    .push(crate::domain::annotation::Annotation {
+                        id: 1,
+                        page: 1,
+                        text: "Selected passage ".repeat(50),
+                        note: "Remember this idea".into(),
+                        color: Some(2),
+                        bounds: vec![[0.1, 0.2, 0.3, 0.4]],
+                    });
+                reader.path = "A very long document title that should truncate instead of displacing controls.pdf".into();
+                reader.geometry = vec![
+                    crate::domain::document::PageGeometry::new(400.0, 600.0, 0)
+                        .unwrap();
+                    10_000
+                ];
+                app.ui.annotations.open = expanded;
+                app.ui.annotations.pages_open = expanded;
+                let output = ctx.run(
+                    egui::RawInput {
+                        screen_rect: Some(egui::Rect::from_min_size(
+                            egui::Pos2::ZERO,
+                            Vec2::new(width, 760.0),
+                        )),
+                        ..Default::default()
+                    },
+                    |ctx| {
+                        app.reader_ui(ctx);
+                        assert!(
+                            ctx.available_rect().width() > 40.0,
+                            "{width}, {expanded}: {:?}",
+                            ctx.available_rect()
+                        );
+                        assert!(
+                            ctx.available_rect().height() > 400.0,
+                            "{width}, {expanded}: {:?}",
+                            ctx.available_rect()
+                        );
+                    },
+                );
+                assert!(output.shapes.len() < 1000);
+                assert!(app.ui.annotations.thumbnail_pending.len() <= 4);
+                if expanded && width > 850.0 {
+                    assert!(!app.ui.annotations.thumbnail_pending.is_empty());
+                }
+            }
+        }
+    }
+
+    #[test]
     fn arrow_scrolling_moves_the_reader_without_pointer_hover_and_repeats() {
         let ctx = egui::Context::default();
         ctx.style_mut(|style| style.scroll_animation = egui::style::ScrollAnimation::none());
@@ -239,242 +566,5 @@ mod tests {
             });
         });
         assert_eq!(app.app.reader.as_ref().unwrap().page, 2);
-    }
-}
-
-impl Eder {
-    pub(crate) fn reader_scroll_delta(&self, ctx: &egui::Context) -> Vec2 {
-        if ctx.wants_keyboard_input()
-            || self.ui.shortcuts_open
-            || self.ui.dialog.is_some()
-            || self.ui.file_dialog.is_some()
-        {
-            return Vec2::ZERO;
-        }
-        let up = pressed(ctx, Modifiers::NONE, Key::ArrowUp);
-        let down = pressed(ctx, Modifiers::NONE, Key::ArrowDown);
-        Vec2::new(0.0, 60.0 * (i32::from(up) - i32::from(down)) as f32)
-    }
-
-    pub(crate) fn keyboard_shortcuts(&mut self, ctx: &egui::Context) {
-        let fullscreen = ctx.input(|i| i.viewport().fullscreen.unwrap_or(false));
-        if pressed(ctx, Modifiers::NONE, Key::F11)
-            || pressed(ctx, Modifiers::CTRL | Modifiers::MAC_CMD, Key::F)
-        {
-            ctx.send_viewport_cmd(egui::ViewportCommand::Fullscreen(!fullscreen));
-        }
-        if pressed(ctx, Modifiers::NONE, Key::F1) {
-            self.ui.shortcuts_open = !self.ui.shortcuts_open;
-        }
-        if pressed(ctx, Modifiers::NONE, Key::Escape) {
-            if self.ui.shortcuts_open {
-                self.ui.shortcuts_open = false;
-            } else if fullscreen {
-                ctx.send_viewport_cmd(egui::ViewportCommand::Fullscreen(false));
-            } else if let Some(id) = ctx.memory(|m| m.focused()) {
-                ctx.memory_mut(|m| m.surrender_focus(id));
-            } else if self.app.reader.is_some() {
-                self.back();
-            } else if self.app.view == View::Settings {
-                self.change_view(View::Library);
-            } else if !self.ui.search.is_empty() {
-                self.ui.search.clear();
-            }
-            return;
-        }
-        if self.ui.shortcuts_open || self.ui.dialog.is_some() || self.ui.file_dialog.is_some() {
-            return;
-        }
-        if pressed(ctx, Modifiers::COMMAND, Key::Q) {
-            // The regular close-request path flushes pending reading positions and settings.
-            ctx.send_viewport_cmd(egui::ViewportCommand::Close);
-            return;
-        }
-        if self.app.reader.as_ref().is_some_and(|r| r.closing) {
-            return;
-        }
-        if pressed(ctx, Modifiers::COMMAND, Key::W) {
-            if self.app.reader.is_some() {
-                self.back();
-            } else {
-                ctx.send_viewport_cmd(egui::ViewportCommand::Close);
-            }
-            return;
-        }
-        if self.app.reader.is_some() {
-            if pressed(ctx, Modifiers::COMMAND, Key::S) {
-                self.save_reading_position();
-            }
-            if pressed(ctx, Modifiers::COMMAND, Key::Plus)
-                || pressed(ctx, Modifiers::COMMAND, Key::Equals)
-            {
-                self.zoom_reader(0.1, false);
-            }
-            if pressed(ctx, Modifiers::COMMAND, Key::Minus) {
-                self.zoom_reader(-0.1, false);
-            }
-            if pressed(ctx, Modifiers::COMMAND, Key::Num0) {
-                self.zoom_reader(0.0, true);
-            }
-            if ctx.wants_keyboard_input() {
-                return;
-            }
-            let reader = self.app.reader.as_ref().unwrap();
-            let (page, total) = (reader.page, reader.total);
-            let target = if pressed(ctx, Modifiers::NONE, Key::Home) {
-                Some(1)
-            } else if pressed(ctx, Modifiers::NONE, Key::End) {
-                Some(total)
-            } else if pressed(ctx, Modifiers::NONE, Key::ArrowRight)
-                || pressed(ctx, Modifiers::NONE, Key::PageDown)
-                || pressed(ctx, Modifiers::NONE, Key::Space)
-            {
-                Some(page.saturating_add(1))
-            } else if pressed(ctx, Modifiers::NONE, Key::ArrowLeft)
-                || pressed(ctx, Modifiers::NONE, Key::PageUp)
-                || pressed(ctx, Modifiers::SHIFT, Key::Space)
-            {
-                Some(page.saturating_sub(1))
-            } else {
-                None
-            };
-            if let Some(page) = target {
-                self.turn(page);
-            }
-        } else {
-            if pressed(ctx, Modifiers::COMMAND, Key::O) {
-                self.pick_pdfs(ctx);
-            }
-            if pressed(ctx, Modifiers::COMMAND, Key::Comma) {
-                self.change_view(View::Settings);
-            }
-            for (key, view) in [
-                (Key::Num1, View::Library),
-                (Key::Num2, View::Reading),
-                (Key::Num3, View::Favorites),
-            ] {
-                if pressed(ctx, Modifiers::COMMAND, key) {
-                    self.change_view(view);
-                }
-            }
-            if pressed(ctx, Modifiers::COMMAND, Key::K) || pressed(ctx, Modifiers::COMMAND, Key::F)
-            {
-                if self.app.view == View::Settings {
-                    self.change_view(View::Library);
-                }
-                ctx.memory_mut(|m| m.request_focus(egui::Id::new("eder-search")));
-            }
-            if self.app.view != View::Settings
-                && (pressed(ctx, Modifiers::NONE, Key::F5)
-                    || pressed(ctx, Modifiers::COMMAND, Key::R))
-            {
-                self.refresh();
-            }
-        }
-    }
-
-    pub(crate) fn save_reading_position(&mut self) {
-        if let Some(reader) = &self.app.reader {
-            if self.send(Task::Position(
-                reader.path.clone(),
-                reader.reading_position(self.app.state.continuous_scroll),
-                true,
-            )) {
-                self.app.reader.as_mut().unwrap().position_changed_at = None;
-            }
-        }
-    }
-
-    fn zoom_reader(&mut self, delta: f32, reset: bool) {
-        if let Some(reader) = &mut self.app.reader {
-            let zoom = if reset {
-                1.0
-            } else {
-                (reader.zoom + delta).clamp(0.5, 3.0)
-            };
-            if zoom != reader.zoom {
-                let position = reader.reading_position(self.app.state.continuous_scroll);
-                reader.zoom = zoom;
-                reader.scroll_to = Some(position);
-                reader.position_changed_at = Some(Instant::now());
-            }
-        }
-    }
-
-    pub(crate) fn window_controls(&mut self, ui: &mut egui::Ui) {
-        let fullscreen = ui.input(|i| i.viewport().fullscreen.unwrap_or(false));
-        if ui
-            .small_button(if fullscreen {
-                "Exit fullscreen"
-            } else {
-                "Fullscreen"
-            })
-            .on_hover_text("Toggle fullscreen (F11; Ctrl+Command+F on macOS)")
-            .clicked()
-        {
-            ui.ctx()
-                .send_viewport_cmd(egui::ViewportCommand::Fullscreen(!fullscreen));
-        }
-        if ui
-            .small_button("Shortcuts")
-            .on_hover_text("Keyboard shortcuts (F1)")
-            .clicked()
-        {
-            self.ui.shortcuts_open = true;
-        }
-    }
-
-    pub(crate) fn shortcuts_help(&mut self, ctx: &egui::Context) {
-        let command = if cfg!(target_os = "macos") {
-            "⌘"
-        } else {
-            "Ctrl"
-        };
-        egui::Window::new("Keyboard shortcuts")
-            .open(&mut self.ui.shortcuts_open)
-            .collapsible(false)
-            .resizable(false)
-            .vscroll(true)
-            .show(ctx, |ui| {
-                egui::Grid::new("shortcut-reference")
-                    .spacing([24.0, 8.0])
-                    .show(ui, |ui| {
-                        for (keys, action) in [
-                            ("F11".into(), "Toggle fullscreen"),
-                            ("F1".into(), "Show / hide keyboard shortcuts"),
-                            (
-                                "Esc".into(),
-                                "Dismiss help / exit fullscreen / leave field / go back",
-                            ),
-                            (format!("{command}+Q"), "Quit Eder"),
-                            (format!("{command}+W"), "Close document / window"),
-                            (format!("{command}+O"), "Add PDFs (library)"),
-                            (
-                                format!("{command}+K or {command}+F"),
-                                "Search documents (library)",
-                            ),
-                            (format!("F5 or {command}+R"), "Refresh documents (library)"),
-                            (
-                                format!("{command}+1 / 2 / 3"),
-                                "Library / Currently Reading / Favorites",
-                            ),
-                            (format!("{command}+,"), "Settings (library)"),
-                            ("→ / Page Down / Space".into(), "Next page"),
-                            ("← / Page Up / Shift+Space".into(), "Previous page"),
-                            ("↑ / ↓".into(), "Scroll up / down"),
-                            ("Home / End".into(), "First / last page"),
-                            (format!("{command}+S"), "Save reading position"),
-                            (format!("{command}++ / {command}+-"), "Zoom in / out"),
-                            (format!("{command}+0"), "Reset zoom"),
-                        ] {
-                            ui.label(egui::RichText::new(keys).strong());
-                            ui.label(action);
-                            ui.end_row();
-                        }
-                    });
-                if cfg!(target_os = "macos") {
-                    ui.label("Control+Command+F also toggles fullscreen.");
-                }
-            });
     }
 }

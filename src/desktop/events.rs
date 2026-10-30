@@ -35,7 +35,10 @@ impl Eder {
                     Transition::ResetReader => {
                         self.runtime.page_gen.fetch_add(1, Ordering::AcqRel);
                         self.runtime.link_gen.fetch_add(1, Ordering::AcqRel);
+                        self.runtime.thumb_gen.fetch_add(1, Ordering::AcqRel);
                         self.ui.annotations = Default::default();
+                        self.ui.annotations.open = self.app.state.reader_annotations_open;
+                        self.ui.annotations.pages_open = self.app.state.reader_pages_open;
                         self.ui.pages.clear();
                         self.ui.current_page = None;
                     }
@@ -153,22 +156,54 @@ impl Eder {
             }
         }
         self.dispatch_continuous_page();
-        // Thumbnail upload is also limited to one per frame, and paused in the reader.
-        if self.app.reader.is_none() {
-            if let Ok(result) = self.runtime.thumb_rx.try_recv() {
-                ctx.request_repaint();
-                if result.id == self.runtime.thumb_gen.load(Ordering::Acquire) {
+        // One thumbnail upload per frame for either the library or reader navigator.
+        if let Ok(result) = self.runtime.thumb_rx.try_recv() {
+            ctx.request_repaint();
+            if result.id == self.runtime.thumb_gen.load(Ordering::Acquire) {
+                if let Some(page) = result.page {
+                    if self
+                        .app
+                        .reader
+                        .as_ref()
+                        .is_some_and(|r| r.path == result.path)
+                    {
+                        self.ui.annotations.thumbnail_pending.remove(&page);
+                        self.ui.annotations.thumbnails.insert(
+                            page,
+                            result.image.map(|image| {
+                                ctx.load_texture(
+                                    "page-preview",
+                                    image,
+                                    egui::TextureOptions::LINEAR,
+                                )
+                            }),
+                        );
+                        if self.ui.annotations.thumbnails.len() > 64 {
+                            let current = page;
+                            let farthest = self
+                                .ui
+                                .annotations
+                                .thumbnails
+                                .keys()
+                                .copied()
+                                .max_by_key(|p| p.abs_diff(current));
+                            if let Some(page) = farthest {
+                                self.ui.annotations.thumbnails.remove(&page);
+                            }
+                        }
+                    }
+                } else if self.app.reader.is_none() {
                     self.ui.pending.remove(&result.path);
                     self.touch(&result.path);
                     self.ui.textures.insert(
                         result.path,
-                        result
-                            .image
-                            .map(|i| ctx.load_texture("preview", i, egui::TextureOptions::LINEAR)),
+                        result.image.map(|image| {
+                            ctx.load_texture("preview", image, egui::TextureOptions::LINEAR)
+                        }),
                     );
                     while self.ui.lru.len() > crate::policy::THUMBNAIL_ENTRIES {
-                        if let Some(p) = self.ui.lru.pop_front() {
-                            self.ui.textures.remove(&p);
+                        if let Some(path) = self.ui.lru.pop_front() {
+                            self.ui.textures.remove(&path);
                         }
                     }
                 }

@@ -90,6 +90,7 @@ pub trait LibraryRepository {
     fn dark(&self, value: bool) -> Result<(), String>;
     fn dark_theme(&self, value: bool) -> Result<(), String>;
     fn continuous_scroll(&self, value: bool) -> Result<(), String>;
+    fn reader_panels(&self, annotations: bool, pages: bool) -> Result<(), String>;
     fn clear_pending(&self) -> Result<(), String>;
     fn finish_session(
         &mut self,

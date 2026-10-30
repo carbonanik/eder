@@ -165,6 +165,12 @@ impl Store {
             dark_theme: self.setting("dark_theme")? == Some(vec![1]),
             dark: self.setting("dark")? == Some(vec![1]),
             continuous_scroll: self.setting("continuous_scroll")? == Some(vec![1]),
+            reader_annotations_open: self
+                .setting("reader_panels")?
+                .is_some_and(|v| v.first() == Some(&1)),
+            reader_pages_open: self
+                .setting("reader_panels")?
+                .is_some_and(|v| v.get(1) == Some(&1)),
             favorites: paths("SELECT path FROM docs WHERE favorite=1")?,
             history: paths("SELECT path FROM docs WHERE opened IS NOT NULL ORDER BY opened DESC")?,
         })
@@ -289,6 +295,9 @@ impl crate::services::ports::LibraryRepository for Store {
     fn continuous_scroll(&self, value: bool) -> Result<(), String> {
         Store::continuous_scroll(self, value)
     }
+    fn reader_panels(&self, annotations: bool, pages: bool) -> Result<(), String> {
+        self.set("reader_panels", &[u8::from(annotations), u8::from(pages)])
+    }
     fn clear_pending(&self) -> Result<(), String> {
         Store::clear_pending(self)
     }
@@ -408,6 +417,7 @@ mod tests {
             s.save_position(&b, 0).unwrap();
             s.dark(true).unwrap();
             s.continuous_scroll(true).unwrap();
+            crate::services::ports::LibraryRepository::reader_panels(&s, true, false).unwrap();
             assert_eq!(s.snapshot().unwrap().history, [a.clone(), b.clone()]);
         }
         let mut s = Store::open(&db).unwrap();
@@ -415,6 +425,8 @@ mod tests {
         assert_eq!(s.position(&b).unwrap(), 1);
         assert!(s.snapshot().unwrap().dark);
         assert!(s.snapshot().unwrap().continuous_scroll);
+        assert!(s.snapshot().unwrap().reader_annotations_open);
+        assert!(!s.snapshot().unwrap().reader_pages_open);
         assert_eq!(s.take_pending().unwrap(), Some(a.clone()));
         assert_eq!(s.take_pending().unwrap(), None);
         s.remove_history(&a).unwrap();

@@ -8,4 +8,6 @@ pub struct Snapshot {
     pub dark: bool,
     pub dark_theme: bool,
     pub continuous_scroll: bool,
+    pub reader_annotations_open: bool,
+    pub reader_pages_open: bool,
 }

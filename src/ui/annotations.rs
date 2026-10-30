@@ -4,6 +4,10 @@ use crate::domain::annotation::{Annotation, TextWord};
 #[derive(Default)]
 pub(crate) struct AnnotationUi {
     pub open: bool,
+    pub pages_open: bool,
+    pub pan: bool,
+    pub thumbnails: std::collections::HashMap<u32, Option<TextureHandle>>,
+    pub thumbnail_pending: std::collections::HashSet<u32>,
     pub filter: usize,
     pub selection: Option<Selection>,
     pub editing: Option<Annotation>,
@@ -63,6 +67,7 @@ pub(crate) fn text_overlay(
     words: &[TextWord],
     annotations: &[Annotation],
     selection: &mut Option<Selection>,
+    pan: bool,
 ) {
     for item in annotations.iter().filter(|a| a.page == page) {
         if let Some(c) = item.color {
@@ -71,6 +76,20 @@ pub(crate) fn text_overlay(
                     .rect_filled(word_rect(rect, bounds), 0.0, color(c));
             }
         }
+    }
+    if pan {
+        let response = ui
+            .interact(
+                rect.intersect(ui.clip_rect()),
+                ui.id().with(("pdf-pan", page)),
+                egui::Sense::drag(),
+            )
+            .on_hover_cursor(egui::CursorIcon::Grab);
+        if response.dragged() {
+            ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
+            ui.scroll_with_delta(ui.input(|i| i.pointer.delta()));
+        }
+        return;
     }
     if words.is_empty() {
         return;
@@ -149,12 +168,13 @@ impl Eder {
             .iter()
             .find(|a| a.page == reader.page && a.color.is_none())
             .map(|a| a.id);
+        ui.selectable_value(&mut self.ui.annotations.pan, true, "Pan")
+            .on_hover_text("Drag the page to move around");
+        ui.selectable_value(&mut self.ui.annotations.pan, false, "Text")
+            .on_hover_text("Drag over text to select, copy, highlight or annotate");
         if ui
-            .button(if bookmark.is_some() {
-                "Remove bookmark"
-            } else {
-                "Bookmark page"
-            })
+            .button(if bookmark.is_some() { "★" } else { "☆" })
+            .on_hover_text("Toggle bookmark for this page")
             .clicked()
         {
             let task = if let Some(id) = bookmark {
@@ -174,7 +194,12 @@ impl Eder {
             };
             self.send(task);
         }
-        ui.toggle_value(&mut self.ui.annotations.open, "Annotations");
+    }
+    pub(crate) fn selection_tools(&mut self, ui: &mut egui::Ui) {
+        let Some(reader) = &self.app.reader else {
+            return;
+        };
+        let path = reader.path.clone();
         let selected = self.ui.annotations.selection.as_ref().and_then(|s| {
             self.app
                 .reader
@@ -184,14 +209,20 @@ impl Eder {
                 .filter(|w| s.start.max(s.end) < w.len())
                 .map(|w| s.annotation(w, 0))
         });
-        if let Some(item) = selected {
+        if let Some(item) = selected.filter(|_| !self.ui.annotations.pan) {
             if ui.button("Copy text").clicked() {
                 ui.ctx().copy_text(item.text.clone());
             }
             for (index, name) in ["Yellow", "Green", "Blue", "Pink"].iter().enumerate() {
                 if ui
-                    .add(egui::Button::new(*name).fill(color(index as u8)))
-                    .on_hover_text("Highlight selected text")
+                    .add(
+                        egui::Button::new(RichText::new("●").color(color(index as u8).to_opaque()))
+                            .min_size(Vec2::splat(28.0)),
+                    )
+                    .on_hover_text(format!(
+                        "Highlight selected text in {}",
+                        name.to_lowercase()
+                    ))
                     .clicked()
                 {
                     self.send(Task::SaveAnnotation(
@@ -206,10 +237,20 @@ impl Eder {
             if ui.button("Add note").clicked() {
                 self.ui.annotations.editing = Some(item);
             }
-        } else {
-            ui.weak("Drag over text to select");
         }
     }
+    fn navigate_to_annotation(&mut self, item: &Annotation) {
+        self.turn(item.page);
+        if let Some(reader) = &mut self.app.reader {
+            reader.scroll_to = Some(ReadingPosition::content(
+                item.page,
+                item.bounds.first().map_or(0.0, |b| (b[1] - 0.08).max(0.0)),
+                reader.zoom,
+                item.bounds.first().map_or(0.0, |b| (b[0] - 0.08).max(0.0)),
+            ));
+        }
+    }
+
     pub(crate) fn annotation_panel(&mut self, ctx: &egui::Context) {
         if let Some((source, rx)) = &self.ui.annotations.export {
             if let Ok(destination) = rx.try_recv() {
@@ -221,11 +262,25 @@ impl Eder {
             }
         }
         if self.ui.annotations.open {
+            let max_width = (ctx.available_rect().width() - 80.0).clamp(200.0, 420.0);
             egui::SidePanel::right("annotations")
-                .default_width(290.0)
+                .default_width(310.0_f32.min(max_width))
+                .width_range(200.0..=max_width)
                 .resizable(true)
                 .show(ctx, |ui| {
-                    ui.heading("Annotations");
+                    ui.spacing_mut().item_spacing = Vec2::new(6.0, 8.0);
+                    ui.horizontal(|ui| {
+                        ui.heading("Annotations");
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            if ui
+                                .button("×")
+                                .on_hover_text("Close annotations (Ctrl/Cmd+Shift+A)")
+                                .clicked()
+                            {
+                                self.ui.annotations.open = false;
+                            }
+                        });
+                    });
                     ui.horizontal_wrapped(|ui| {
                         for (index, label) in ["All", "Bookmarks", "Highlights", "Notes"]
                             .iter()
@@ -269,57 +324,112 @@ impl Eder {
                     }
                     egui::ScrollArea::vertical().show(ui, |ui| {
                         for item in items {
-                            ui.group(|ui| {
-                                if ui
-                                    .button(format!(
-                                        "{} · Page {}",
-                                        if item.color.is_none() {
+                            let mut navigate = false;
+                            let colors = palette(ui.visuals());
+                            egui::Frame::none()
+                                .fill(colors.light)
+                                .stroke(egui::Stroke::new(1.0_f32, colors.hairline))
+                                .rounding(6.0)
+                                .inner_margin(12.0)
+                                .show(ui, |ui| {
+                                    ui.set_width(ui.available_width());
+                                    ui.horizontal(|ui| {
+                                        let tint = item
+                                            .color
+                                            .map(|c| color(c).to_opaque())
+                                            .unwrap_or(colors.teal);
+                                        let (dot, _) = ui.allocate_exact_size(
+                                            Vec2::splat(10.0),
+                                            egui::Sense::hover(),
+                                        );
+                                        ui.painter().circle_filled(dot.center(), 5.0, tint);
+                                        let kind = if item.color.is_none() {
                                             "Bookmark"
+                                        } else if !item.note.is_empty() {
+                                            "Note"
                                         } else {
                                             "Highlight"
-                                        },
-                                        item.page
-                                    ))
-                                    .clicked()
-                                {
-                                    self.turn(item.page);
-                                    if let Some(reader) = &mut self.app.reader {
-                                        reader.scroll_to = Some(ReadingPosition::content(
-                                            item.page,
-                                            item.bounds
-                                                .first()
-                                                .map_or(0.0, |b| (b[1] - 0.08).max(0.0)),
-                                            reader.zoom,
-                                            0.0,
-                                        ));
-                                    }
-                                }
-                                if !item.text.is_empty() {
-                                    ui.label(&item.text);
-                                }
-                                if !item.note.is_empty() {
-                                    ui.label(RichText::new(&item.note).italics());
-                                }
-                                ui.horizontal(|ui| {
-                                    if item.color.is_some()
-                                        && ui.button("Edit note / color").clicked()
+                                        };
+                                        navigate |= ui
+                                            .add(
+                                                egui::Label::new(
+                                                    RichText::new(format!(
+                                                        "{kind} · Page {}",
+                                                        item.page
+                                                    ))
+                                                    .size(13.0),
+                                                )
+                                                .sense(egui::Sense::click()),
+                                            )
+                                            .on_hover_text("Go to annotation")
+                                            .clicked();
+                                        ui.with_layout(
+                                            egui::Layout::right_to_left(egui::Align::Center),
+                                            |ui| {
+                                                ui.menu_button("⋮", |ui| {
+                                                    if item.color.is_some()
+                                                        && ui.button("Edit note / color").clicked()
+                                                    {
+                                                        self.ui.annotations.editing =
+                                                            Some(item.clone());
+                                                        ui.close_menu();
+                                                    }
+                                                    if !item.note.is_empty()
+                                                        && ui.button("Delete note").clicked()
+                                                    {
+                                                        self.send(Task::SaveAnnotation(
+                                                            path.clone(),
+                                                            Box::new(Annotation {
+                                                                note: String::new(),
+                                                                ..item.clone()
+                                                            }),
+                                                        ));
+                                                        ui.close_menu();
+                                                    }
+                                                    if ui.button("Delete annotation").clicked() {
+                                                        self.send(Task::DeleteAnnotation(
+                                                            path.clone(),
+                                                            item.id,
+                                                        ));
+                                                        ui.close_menu();
+                                                    }
+                                                })
+                                                .response
+                                                .on_hover_text("Annotation actions");
+                                            },
+                                        );
+                                    });
+                                    for (text, italic) in [(&item.text, false), (&item.note, true)]
                                     {
-                                        self.ui.annotations.editing = Some(item.clone());
-                                    }
-                                    if !item.note.is_empty() && ui.button("Delete note").clicked() {
-                                        self.send(Task::SaveAnnotation(
-                                            path.clone(),
-                                            Box::new(Annotation {
-                                                note: String::new(),
-                                                ..item.clone()
-                                            }),
-                                        ));
-                                    }
-                                    if ui.button("Delete").clicked() {
-                                        self.send(Task::DeleteAnnotation(path.clone(), item.id));
+                                        if text.is_empty() {
+                                            continue;
+                                        }
+                                        let preview: String = text.chars().take(180).collect();
+                                        let preview = if text.chars().count() > 180 {
+                                            format!("{preview}…")
+                                        } else {
+                                            preview
+                                        };
+                                        let rich =
+                                            RichText::new(preview).size(13.0).color(colors.muted);
+                                        navigate |= ui
+                                            .add(
+                                                egui::Label::new(if italic {
+                                                    rich.italics()
+                                                } else {
+                                                    rich
+                                                })
+                                                .wrap()
+                                                .sense(egui::Sense::click()),
+                                            )
+                                            .on_hover_text(text)
+                                            .clicked();
                                     }
                                 });
-                            });
+                            ui.add_space(4.0);
+                            if navigate {
+                                self.navigate_to_annotation(&item);
+                            }
                         }
                     });
                 });
@@ -399,7 +509,7 @@ mod tests {
                 };
                 let _ = ctx.run(input, |ctx| {
                     egui::CentralPanel::default().show(ctx, |ui| {
-                        text_overlay(ui, rect, 1, &words, &[], &mut selection);
+                        text_overlay(ui, rect, 1, &words, &[], &mut selection, false);
                     });
                 });
             };

@@ -62,6 +62,9 @@ impl<R: LibraryRepository> PersistenceService<R> {
     pub fn continuous_scroll(&self, value: bool) -> Result<(), String> {
         self.repository.continuous_scroll(value)
     }
+    pub fn reader_panels(&self, annotations: bool, pages: bool) -> Result<(), String> {
+        self.repository.reader_panels(annotations, pages)
+    }
     pub fn clear_pending(&self) -> Result<(), String> {
         self.repository.clear_pending()
     }

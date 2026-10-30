@@ -186,7 +186,7 @@ pub(super) fn thumbnails<P: Send + 'static>(
                 let key = crate::domain::document::RenderKey {
                     document: crate::domain::document::DocumentId::from_canonical(job.path.clone()),
                     revision,
-                    page: 1,
+                    page: job.page.unwrap_or(1),
                     edge: crate::policy::THUMB_EDGE,
                     dark: false,
                     backend_version: 1,
@@ -200,6 +200,7 @@ pub(super) fn thumbnails<P: Send + 'static>(
             && !deliver(
                 &results,
                 ThumbResult {
+                    page: job.page,
                     path: job.path,
                     id: job.id,
                     image,

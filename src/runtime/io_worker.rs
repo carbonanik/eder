@@ -222,6 +222,10 @@ pub(super) fn run(data: Option<PathBuf>, worker: IoWorker) {
                     send(Event::Dark(b));
                     return Ok(());
                 }
+                Task::ReaderPanels(annotations, pages) => {
+                    store.reader_panels(annotations, pages)?;
+                    return Ok(());
+                }
                 Task::ReadingMode(b) => {
                     store.continuous_scroll(b)?;
                     send(Event::ReadingMode(b));

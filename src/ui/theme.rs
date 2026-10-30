@@ -100,6 +100,9 @@ pub(crate) enum UiIcon {
     Star,
     Close,
     Folder,
+    Bookmark,
+    Annotate,
+    Note,
 }
 
 pub(crate) fn paint_icon(painter: &egui::Painter, rect: egui::Rect, icon: UiIcon, color: Color32) {
@@ -221,6 +224,50 @@ pub(crate) fn paint_icon(painter: &egui::Painter, rect: egui::Rect, icon: UiIcon
         UiIcon::Close => {
             line(point(-0.6, -0.6), point(0.6, 0.6));
             line(point(0.6, -0.6), point(-0.6, 0.6));
+        }
+        UiIcon::Bookmark => {
+            let points = [
+                point(-0.6, -0.85),
+                point(0.6, -0.85),
+                point(0.6, 0.85),
+                point(0.0, 0.4),
+                point(-0.6, 0.85),
+                point(-0.6, -0.85),
+            ];
+            for segment in points.windows(2) {
+                line(segment[0], segment[1]);
+            }
+        }
+        UiIcon::Annotate => {
+            let points = [
+                point(-0.7, 0.55),
+                point(-0.5, -0.05),
+                point(0.45, -0.95),
+                point(0.85, -0.55),
+                point(-0.1, 0.35),
+                point(-0.7, 0.55),
+            ];
+            for segment in points.windows(2) {
+                line(segment[0], segment[1]);
+            }
+            line(point(-0.8, 0.9), point(0.8, 0.9));
+        }
+        UiIcon::Note => {
+            let points = [
+                point(-0.8, -0.75),
+                point(0.8, -0.75),
+                point(0.8, 0.45),
+                point(-0.15, 0.45),
+                point(-0.65, 0.9),
+                point(-0.65, 0.45),
+                point(-0.8, 0.45),
+                point(-0.8, -0.75),
+            ];
+            for segment in points.windows(2) {
+                line(segment[0], segment[1]);
+            }
+            line(point(-0.4, -0.3), point(0.4, -0.3));
+            line(point(-0.4, 0.05), point(0.2, 0.05));
         }
         UiIcon::Folder => {
             let points = [

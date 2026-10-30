@@ -16,100 +16,23 @@ impl Eder {
                 ctx.copy_text(text);
             }
         }
-        if !ctx.input(|input| input.viewport().fullscreen.unwrap_or(false)) {
-            egui::TopBottomPanel::top("reader_toolbar")
-                .frame(
-                    egui::Frame::none()
-                        .fill(palette(&ctx.style().visuals).paper)
-                        .inner_margin(egui::Margin::symmetric(20.0, 12.0)),
-                )
-                .show(ctx, |ui| {
-                    ui.horizontal_wrapped(|ui| {
-                        if icon_label_button(
-                            ui,
-                            UiIcon::ArrowLeft,
-                            "Back",
-                            IconLabelStyle {
-                                size: Vec2::new(78.0, 28.0),
-                                fill: ui.visuals().widgets.inactive.bg_fill,
-                                color: ui.visuals().text_color(),
-                                text_size: 14.0,
-                                rounding: 4.0,
-                            },
-                        )
-                        .clicked()
-                        {
-                            self.back();
-                            return;
-                        }
-                        self.window_controls(ui);
-                        if let Some(r) = &self.app.reader {
-                            ui.label(
-                                RichText::new(
-                                    r.path.file_name().unwrap_or_default().to_string_lossy(),
-                                )
-                                .strong(),
-                            );
-                        }
-                    });
-                    if self.app.reader.is_none() {
-                        return;
-                    }
-                    let (page, total) = {
-                        let r = self.app.reader.as_ref().unwrap();
-                        (r.page, r.total)
-                    };
-                    ui.horizontal_wrapped(|ui| {
-                        if ui
-                            .add_enabled(page > 1, egui::Button::new("Previous"))
-                            .clicked()
-                        {
-                            self.turn(page - 1);
-                        }
-                        let mut jump = page;
-                        ui.label("Page");
-                        if ui
-                            .add(egui::DragValue::new(&mut jump).range(1..=total))
-                            .changed()
-                        {
-                            self.turn(jump);
-                        }
-                        ui.label(format!("of {total}"));
-                        if ui
-                            .add_enabled(page < total, egui::Button::new("Next"))
-                            .clicked()
-                        {
-                            self.turn(page + 1);
-                        }
-                        if ui
-                            .button("Save Position")
-                            .on_hover_text("Save reading position (Ctrl/Cmd+S)")
-                            .clicked()
-                        {
-                            self.save_reading_position();
-                        }
-                        self.annotation_tools(ui);
-                        let mut dark = self.app.state.dark;
-                        if ui.checkbox(&mut dark, "Dark pages").changed() {
-                            self.send(Task::Dark(dark));
-                        }
-                        if let Some(r) = &mut self.app.reader {
-                            if ui
-                                .add(egui::Slider::new(&mut r.zoom, 0.5..=3.0).text("Zoom"))
-                                .changed()
-                            {
-                                r.scroll_to =
-                                    Some(r.reading_position(self.app.state.continuous_scroll));
-                                r.position_changed_at = Some(std::time::Instant::now());
-                            }
-                        }
-                    });
-                });
-        }
+        self.reader_toolbar(ctx);
         if self.app.reader.is_none() {
             return;
         }
+        self.reader_rail(ctx);
         self.annotation_panel(ctx);
+        let panels = (self.ui.annotations.open, self.ui.annotations.pages_open);
+        if panels
+            != (
+                self.app.state.reader_annotations_open,
+                self.app.state.reader_pages_open,
+            )
+            && self.send(Task::ReaderPanels(panels.0, panels.1))
+        {
+            self.app.state.reader_annotations_open = panels.0;
+            self.app.state.reader_pages_open = panels.1;
+        }
         let mut internal_jump = None;
         egui::CentralPanel::default()
             .frame(
@@ -119,7 +42,7 @@ impl Eder {
                     } else {
                         palette(&ctx.style().visuals).sage
                     })
-                    .inner_margin(18.0),
+                    .inner_margin(10.0),
             )
             .show(ctx, |ui| {
                 if self.app.state.continuous_scroll {
@@ -156,7 +79,7 @@ impl Eder {
                             ui.horizontal(|ui| {
                                 ui.add_space(((ui.available_width() - size.x) / 2.0).max(0.0));
                                 let image = ui.add(egui::Image::new(t).fit_to_exact_size(size));
-                                super::annotations::text_overlay(ui,image.rect,r.page,r.text.get(&r.page).map(Vec::as_slice).unwrap_or_default(),&r.annotations,&mut self.ui.annotations.selection);
+                                super::annotations::text_overlay(ui,image.rect,r.page,r.text.get(&r.page).map(Vec::as_slice).unwrap_or_default(),&r.annotations,&mut self.ui.annotations.selection, self.ui.annotations.pan);
                                 if let Some(links) = r.links.get(&r.page) {
                                     internal_jump = clicked_pdf_link(ui, image.rect, r.page, links);
                                 }
@@ -174,6 +97,364 @@ impl Eder {
             self.turn(target);
         }
     }
+    fn reader_toolbar(&mut self, ctx: &egui::Context) {
+        egui::TopBottomPanel::top("reader_toolbar")
+            .frame(
+                egui::Frame::none()
+                    .fill(palette(&ctx.style().visuals).paper)
+                    .inner_margin(egui::Margin::symmetric(12.0, 8.0)),
+            )
+            .show(ctx, |ui| {
+                ui.spacing_mut().item_spacing = Vec2::new(6.0, 6.0);
+                ui.spacing_mut().button_padding = Vec2::new(9.0, 7.0);
+                ui.horizontal(|ui| {
+                    ui.add(egui::Image::new(&self.ui.logo).fit_to_exact_size(Vec2::splat(24.0)));
+                    let back = icon_label_button(ui, UiIcon::ArrowLeft, "Back", IconLabelStyle {
+                        size: Vec2::new(80.0, 28.0),
+                        fill: ui.visuals().widgets.inactive.bg_fill,
+                        color: ui.visuals().text_color(),
+                        text_size: 14.0,
+                        rounding: 4.0,
+                    });
+                    if back.clicked() {
+                        self.back();
+                    }
+                    let title = self
+                        .app
+                        .reader
+                        .as_ref()
+                        .map(|r| {
+                            r.path
+                                .file_name()
+                                .unwrap_or_default()
+                                .to_string_lossy()
+                                .into_owned()
+                        })
+                        .unwrap_or_default();
+                    let title_width = (ui.available_width() - 80.0).max(20.0);
+                    ui.add_sized(
+                        [title_width, 28.0],
+                        egui::Label::new(RichText::new(&title).strong()).truncate(),
+                    )
+                    .on_hover_text(title);
+                    ui.menu_button("⚙", |ui| {
+                        ui.label("Reader settings");
+                        let mut continuous = self.app.state.continuous_scroll;
+                        if ui
+                            .checkbox(&mut continuous, "Continuous scrolling")
+                            .changed()
+                        {
+                            self.send(Task::ReadingMode(continuous));
+                        }
+                        let mut dark = self.app.state.dark_theme;
+                        if ui.checkbox(&mut dark, "Dark interface").changed() {
+                            self.send(Task::DarkTheme(dark));
+                        }
+                        if ui.button("Keyboard shortcuts (F1)").clicked() {
+                            self.ui.shortcuts_open = true;
+                            ui.close_menu();
+                        }
+                        ui.weak("Reading position saves automatically");
+                    })
+                    .response
+                    .on_hover_text("Reader settings");
+                });
+                ui.separator();
+                if self.app.reader.is_none() {
+                    return;
+                }
+                // Groups wrap as units on narrow windows, keeping navigation together.
+                ui.horizontal_wrapped(|ui| {
+                    toolbar_group(ui, |ui| self.reader_navigation_tools(ui));
+                    toolbar_group(ui, |ui| self.reader_zoom_tools(ui));
+                    toolbar_group(ui, |ui| self.annotation_tools(ui));
+                    toolbar_group(ui, |ui| {
+                        let mut dark = self.app.state.dark;
+                        if ui
+                            .checkbox(&mut dark, "Dark pages")
+                            .on_hover_text("Invert PDF page colors")
+                            .changed()
+                        {
+                            self.send(Task::Dark(dark));
+                        }
+                        let fullscreen = ui.input(|i| i.viewport().fullscreen.unwrap_or(false));
+                        if ui
+                            .button(if fullscreen {
+                                "Exit fullscreen"
+                            } else {
+                                "Fullscreen"
+                            })
+                            .on_hover_text("Toggle fullscreen (F11)")
+                            .clicked()
+                        {
+                            ui.ctx()
+                                .send_viewport_cmd(egui::ViewportCommand::Fullscreen(!fullscreen));
+                        }
+                    });
+                });
+                if self.ui.annotations.selection.is_some() && !self.ui.annotations.pan {
+                    ui.horizontal_wrapped(|ui| {
+                        ui.weak("Selected text");
+                        self.selection_tools(ui);
+                    });
+                }
+            });
+    }
+
+    fn reader_navigation_tools(&mut self, ui: &mut egui::Ui) {
+        let reader = self.app.reader.as_ref().unwrap();
+        let (page, total) = (reader.page, reader.total);
+        if ui
+            .add_enabled(page > 1, egui::Button::new("‹"))
+            .on_hover_text("Previous page (←)")
+            .clicked()
+        {
+            self.turn(page - 1);
+        }
+        let mut jump = page;
+        if ui
+            .add(
+                egui::DragValue::new(&mut jump)
+                    .range(1..=total)
+                    .prefix("Page "),
+            )
+            .on_hover_text("Type a page number or drag to navigate")
+            .changed()
+        {
+            self.turn(jump);
+        }
+        ui.weak(format!("/ {total}"));
+        if ui
+            .add_enabled(page < total, egui::Button::new("›"))
+            .on_hover_text("Next page (→)")
+            .clicked()
+        {
+            self.turn(page + 1);
+        }
+    }
+
+    fn reader_zoom_tools(&mut self, ui: &mut egui::Ui) {
+        if ui
+            .button("−")
+            .on_hover_text("Zoom out (Ctrl/Cmd+−)")
+            .clicked()
+        {
+            self.zoom_reader(-0.1, false);
+        }
+        let zoom = self.app.reader.as_ref().unwrap().zoom;
+        ui.menu_button(format!("{:.0}%", zoom * 100.0), |ui| {
+            for value in [0.5, 0.75, 1.0, 1.25, 1.5, 2.0, 3.0] {
+                if ui
+                    .selectable_label(
+                        (zoom - value).abs() < 0.01,
+                        format!("{:.0}%", value * 100.0),
+                    )
+                    .clicked()
+                {
+                    self.zoom_reader(value - zoom, false);
+                    ui.close_menu();
+                }
+            }
+            ui.separator();
+            if ui
+                .button("Fit page")
+                .on_hover_text("Fit the whole page in this viewport")
+                .clicked()
+            {
+                // Single-page mode fits both dimensions at 100%.
+                if self.app.state.continuous_scroll {
+                    self.send(Task::ReadingMode(false));
+                }
+                self.zoom_reader(0.0, true);
+                ui.close_menu();
+            }
+            if ui
+                .button("Fit width")
+                .on_hover_text("Read full-width pages with vertical scrolling")
+                .clicked()
+            {
+                if !self.app.state.continuous_scroll {
+                    self.send(Task::ReadingMode(true));
+                }
+                self.zoom_reader(0.0, true);
+                ui.close_menu();
+            }
+        })
+        .response
+        .on_hover_text("Zoom presets and page fitting (Ctrl/Cmd+0 to reset)");
+        if ui
+            .button("+")
+            .on_hover_text("Zoom in (Ctrl/Cmd++)")
+            .clicked()
+        {
+            self.zoom_reader(0.1, false);
+        }
+    }
+
+    fn reader_rail(&mut self, ctx: &egui::Context) {
+        egui::SidePanel::left("reader_rail")
+            .exact_width(48.0)
+            .resizable(false)
+            .frame(
+                egui::Frame::none()
+                    .fill(palette(&ctx.style().visuals).paper)
+                    .inner_margin(egui::Margin::symmetric(5.0, 10.0)),
+            )
+            .show(ctx, |ui| {
+                ui.spacing_mut().item_spacing.y = 8.0;
+                for (filter, icon, label) in [
+                    (4, UiIcon::Grid, "Pages"),
+                    (1, UiIcon::Bookmark, "Bookmarks"),
+                    (0, UiIcon::Annotate, "Annotations"),
+                    (3, UiIcon::Note, "Notes"),
+                ] {
+                    let active = if filter == 4 {
+                        self.ui.annotations.pages_open
+                    } else {
+                        self.ui.annotations.open && self.ui.annotations.filter == filter
+                    };
+                    let colors = palette(ui.visuals());
+                    if icon_label_button(
+                        ui,
+                        icon,
+                        "",
+                        IconLabelStyle {
+                            size: Vec2::splat(36.0),
+                            fill: if active {
+                                colors.deep
+                            } else {
+                                Color32::TRANSPARENT
+                            },
+                            color: if active { colors.teal } else { colors.muted },
+                            text_size: 14.0,
+                            rounding: 6.0,
+                        },
+                    )
+                    .on_hover_text(label)
+                    .clicked()
+                    {
+                        if filter == 4 {
+                            self.ui.annotations.pages_open = !active;
+                            if !active && ctx.screen_rect().width() < 850.0 {
+                                self.ui.annotations.open = false;
+                            }
+                        } else {
+                            self.ui.annotations.open = !active;
+                            self.ui.annotations.filter = filter;
+                            if !active && ctx.screen_rect().width() < 850.0 {
+                                self.ui.annotations.pages_open = false;
+                            }
+                        }
+                    }
+                }
+                ui.add_enabled(false, egui::Button::new("≡").min_size(Vec2::splat(36.0)))
+                    .on_disabled_hover_text(
+                        "Document outline is not available with this PDF backend",
+                    );
+            });
+        // Small windows display one expanded panel at a time.
+        if ctx.screen_rect().width() < 850.0 && self.ui.annotations.open {
+            self.ui.annotations.pages_open = false;
+        }
+        if self.ui.annotations.pages_open {
+            egui::SidePanel::left("reader_pages")
+                .default_width(172.0)
+                .width_range(140.0..=240.0)
+                .show(ctx, |ui| {
+                    ui.horizontal(|ui| {
+                        ui.heading("Pages");
+                        if ui.small_button("×").on_hover_text("Close pages").clicked() {
+                            self.ui.annotations.pages_open = false;
+                        }
+                    });
+                    ui.separator();
+                    let (page, total) = {
+                        let r = self.app.reader.as_ref().unwrap();
+                        (r.page, r.total)
+                    };
+                    // Virtualize long documents; use cached page previews where available.
+                    egui::ScrollArea::vertical()
+                        .id_salt("page_navigation")
+                        .show_rows(ui, 124.0, total as usize, |ui, range| {
+                            for index in range {
+                                let target = index as u32 + 1;
+                                let preview = self
+                                    .ui
+                                    .annotations
+                                    .thumbnails
+                                    .get(&target)
+                                    .and_then(Clone::clone);
+                                if !self.ui.annotations.thumbnails.contains_key(&target)
+                                    && self.ui.annotations.thumbnail_pending.len() < 4
+                                    && !self.ui.annotations.thumbnail_pending.contains(&target)
+                                {
+                                    let job = ThumbJob {
+                                        page: Some(target),
+                                        path: self.app.reader.as_ref().unwrap().path.clone(),
+                                        id: self.runtime.thumb_gen.load(Ordering::Acquire),
+                                    };
+                                    if self.runtime.thumb_tx.try_send(job).is_ok() {
+                                        self.ui.annotations.thumbnail_pending.insert(target);
+                                    }
+                                }
+                                let response = egui::Frame::none()
+                                    .fill(if target == page {
+                                        palette(ui.visuals()).sage
+                                    } else {
+                                        Color32::TRANSPARENT
+                                    })
+                                    .inner_margin(6.0)
+                                    .rounding(4.0)
+                                    .show(ui, |ui| {
+                                        ui.set_min_width(ui.available_width());
+                                        ui.set_min_height(112.0);
+                                        ui.vertical_centered(|ui| {
+                                            if let Some(texture) = preview {
+                                                let size = texture.size_vec2();
+                                                ui.add(
+                                                    egui::Image::new(&texture).fit_to_exact_size(
+                                                        size * (76.0 / size.y).min(100.0 / size.x),
+                                                    ),
+                                                );
+                                            } else {
+                                                let (rect, _) = ui.allocate_exact_size(
+                                                    Vec2::new(54.0, 76.0),
+                                                    egui::Sense::hover(),
+                                                );
+                                                ui.painter().rect_filled(
+                                                    rect,
+                                                    2.0,
+                                                    palette(ui.visuals()).light,
+                                                );
+                                                ui.painter().text(
+                                                    rect.center(),
+                                                    egui::Align2::CENTER_CENTER,
+                                                    target.to_string(),
+                                                    egui::FontId::proportional(18.0),
+                                                    palette(ui.visuals()).muted,
+                                                );
+                                            }
+                                            ui.label(format!("Page {target}"));
+                                        });
+                                    })
+                                    .response;
+                                if ui
+                                    .interact(
+                                        response.rect,
+                                        ui.id().with(target),
+                                        egui::Sense::click(),
+                                    )
+                                    .on_hover_text(format!("Go to page {target}"))
+                                    .clicked()
+                                {
+                                    self.turn(target);
+                                }
+                            }
+                        });
+                });
+        }
+    }
+
     pub(crate) fn continuous_reader_ui(&mut self, ui: &mut egui::Ui) {
         use crate::app::reader::layout::PageLayout;
         let keyboard_scroll = self.reader_scroll_delta(ui.ctx());
@@ -257,6 +538,7 @@ impl Eder {
                             .unwrap_or_default(),
                         &reader.annotations,
                         &mut self.ui.annotations.selection,
+                        self.ui.annotations.pan,
                     );
                     if let Some(links) = reader.links.get(&page) {
                         if let Some(target) = clicked_pdf_link(ui, image.rect, page, links) {
@@ -358,4 +640,14 @@ fn clicked_pdf_link(
         }
     }
     destination
+}
+
+fn toolbar_group(ui: &mut egui::Ui, content: impl FnOnce(&mut egui::Ui)) {
+    egui::Frame::none()
+        .fill(palette(ui.visuals()).light)
+        .rounding(5.0)
+        .inner_margin(egui::Margin::symmetric(5.0, 2.0))
+        .show(ui, |ui| {
+            ui.horizontal(content);
+        });
 }
