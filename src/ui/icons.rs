@@ -29,6 +29,7 @@ pub(crate) enum UiIcon {
     Bookmark,
     Annotate,
     Note,
+    MoreVert,
 }
 
 impl UiIcon {
@@ -59,6 +60,7 @@ impl UiIcon {
             Self::Bookmark => '\u{e8e7}',
             Self::Annotate => '\u{f097}',
             Self::Note => '\u{f1fc}',
+            Self::MoreVert => '\u{e5d4}',
         }
     }
 }

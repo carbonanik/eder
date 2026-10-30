@@ -106,8 +106,8 @@ impl Eder {
             )
             .show(ctx, |ui| {
                 reader_style(ui);
-                ui.spacing_mut().item_spacing = Vec2::new(8.0, 8.0);
-                ui.spacing_mut().button_padding = Vec2::new(10.0, 6.0);
+                ui.spacing_mut().item_spacing = Vec2::new(6.0, 8.0);
+                ui.spacing_mut().button_padding = Vec2::new(8.0, 6.0);
                 ui.horizontal(|ui| {
                     ui.add(egui::Image::new(&self.ui.logo).fit_to_exact_size(Vec2::splat(24.0)));
                     let title = self
@@ -132,29 +132,37 @@ impl Eder {
                     if theme_switch(ui, &mut dark_theme).changed() {
                         self.send(Task::DarkTheme(dark_theme));
                     }
-                    ui.menu_button("⚙", |ui| {
-                        ui.label("Reader settings");
-                        let mut continuous = self.app.state.continuous_scroll;
-                        if ui
-                            .checkbox(&mut continuous, "Continuous scrolling")
-                            .changed()
-                        {
-                            self.send(Task::ReadingMode(continuous));
-                        }
-                        let mut dark = self.app.state.dark_theme;
-                        if ui.checkbox(&mut dark, "Dark interface").changed() {
-                            self.send(Task::DarkTheme(dark));
-                        }
-                        if ui.button("Keyboard shortcuts (F1)").clicked() {
-                            self.ui.shortcuts_open = true;
-                            ui.close_menu();
-                        }
-                        ui.weak("Reading position saves automatically");
-                    })
+                    ui.menu_button(
+                        egui::RichText::new(UiIcon::Settings.glyph().to_string()).font(
+                            egui::FontId::new(
+                                18.0,
+                                egui::FontFamily::Name(MATERIAL_SYMBOLS_FONT.into()),
+                            ),
+                        ),
+                        |ui| {
+                            ui.label("Reader settings");
+                            let mut continuous = self.app.state.continuous_scroll;
+                            if ui
+                                .checkbox(&mut continuous, "Continuous scrolling")
+                                .changed()
+                            {
+                                self.send(Task::ReadingMode(continuous));
+                            }
+                            let mut dark = self.app.state.dark_theme;
+                            if ui.checkbox(&mut dark, "Dark interface").changed() {
+                                self.send(Task::DarkTheme(dark));
+                            }
+                            if ui.button("Keyboard shortcuts (F1)").clicked() {
+                                self.ui.shortcuts_open = true;
+                                ui.close_menu();
+                            }
+                            ui.weak("Reading position saves automatically");
+                        },
+                    )
                     .response
                     .on_hover_text("Reader settings");
                 });
-                ui.separator();
+                ui.add_space(2.0);
                 if self.app.reader.is_none() {
                     return;
                 }
@@ -170,7 +178,7 @@ impl Eder {
                                 "",
                                 IconLabelStyle {
                                     size: Vec2::new(32.0, 32.0),
-                                    fill: colors.light,
+                                    fill: Color32::TRANSPARENT,
                                     color: colors.ink,
                                     text_size: 13.0,
                                     rounding: 6.0,
@@ -182,15 +190,20 @@ impl Eder {
                                 self.back();
                             }
                         });
+                        ui.separator();
                         toolbar_group(ui, |ui| self.reader_navigation_tools(ui));
+                        ui.separator();
                         toolbar_group(ui, |ui| self.reader_zoom_tools(ui));
+                        ui.separator();
                         toolbar_group(ui, |ui| self.annotation_tools(ui));
                         if self.ui.annotations.selection.is_some() && !self.ui.annotations.pan {
+                            ui.separator();
                             toolbar_group(ui, |ui| {
                                 ui.weak("Selected text");
                                 self.selection_tools(ui);
                             });
                         }
+                        ui.separator();
                         toolbar_group(ui, |ui| {
                             let colors = reader_palette(ui.visuals());
                             if icon_label_button(
@@ -243,38 +256,45 @@ impl Eder {
                             {
                                 self.ui.annotations.open = !self.ui.annotations.open;
                             }
-                            ui.menu_button("•••", |ui| {
-                                let mut dark = self.app.state.dark;
-                                if ui.checkbox(&mut dark, "Dark pages").changed() {
-                                    self.send(Task::Dark(dark));
-                                }
-                                let fullscreen =
-                                    ui.input(|i| i.viewport().fullscreen.unwrap_or(false));
-                                if icon_label_button(
-                                    ui,
-                                    UiIcon::Fullscreen,
-                                    if fullscreen {
-                                        "Exit fullscreen"
-                                    } else {
-                                        "Fullscreen"
-                                    },
-                                    IconLabelStyle {
-                                        size: Vec2::new(160.0, 32.0),
-                                        fill: Color32::TRANSPARENT,
-                                        color: reader_palette(ui.visuals()).ink,
-                                        text_size: 13.0,
-                                        rounding: 6.0,
-                                    },
-                                )
-                                .clicked()
-                                {
-                                    ui.ctx()
-                                        .send_viewport_cmd(egui::ViewportCommand::Fullscreen(
-                                            !fullscreen,
-                                        ));
-                                    ui.close_menu();
-                                }
-                            });
+                            ui.menu_button(
+                                egui::RichText::new(UiIcon::MoreVert.glyph().to_string()).font(
+                                    egui::FontId::new(
+                                        18.0,
+                                        egui::FontFamily::Name(MATERIAL_SYMBOLS_FONT.into()),
+                                    ),
+                                ),
+                                |ui| {
+                                    let mut dark = self.app.state.dark;
+                                    if ui.checkbox(&mut dark, "Dark pages").changed() {
+                                        self.send(Task::Dark(dark));
+                                    }
+                                    let fullscreen =
+                                        ui.input(|i| i.viewport().fullscreen.unwrap_or(false));
+                                    if icon_label_button(
+                                        ui,
+                                        UiIcon::Fullscreen,
+                                        if fullscreen {
+                                            "Exit fullscreen"
+                                        } else {
+                                            "Fullscreen"
+                                        },
+                                        IconLabelStyle {
+                                            size: Vec2::new(160.0, 32.0),
+                                            fill: Color32::TRANSPARENT,
+                                            color: reader_palette(ui.visuals()).ink,
+                                            text_size: 13.0,
+                                            rounding: 6.0,
+                                        },
+                                    )
+                                    .clicked()
+                                    {
+                                        ui.ctx().send_viewport_cmd(
+                                            egui::ViewportCommand::Fullscreen(!fullscreen),
+                                        );
+                                        ui.close_menu();
+                                    }
+                                },
+                            );
                         });
                     },
                 );
@@ -301,7 +321,10 @@ impl Eder {
         }
         let mut jump = page;
         if ui
-            .add(egui::DragValue::new(&mut jump).range(1..=total).speed(0.15))
+            .add_sized(
+                [44.0, 32.0],
+                egui::DragValue::new(&mut jump).range(1..=total).speed(0.15),
+            )
             .on_hover_text("Type a page number or drag to navigate")
             .changed()
         {
@@ -774,8 +797,9 @@ fn clicked_pdf_link(
 
 fn toolbar_group(ui: &mut egui::Ui, content: impl FnOnce(&mut egui::Ui)) {
     egui::Frame::none()
-        .inner_margin(egui::Margin::symmetric(2.0, 0.0))
+        .inner_margin(egui::Margin::symmetric(4.0, 1.0))
         .show(ui, |ui| {
+            ui.spacing_mut().item_spacing = Vec2::new(2.0, 0.0);
             ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), content);
         });
 }

@@ -13,6 +13,7 @@ pub(crate) struct AnnotationUi {
     pub thumbnail_pending: std::collections::HashSet<u32>,
     pub filter: usize,
     pub selection: Option<Selection>,
+    pub highlight_color: u8,
     pub editing: Option<Annotation>,
     pub export: Option<(PathBuf, std::sync::mpsc::Receiver<Option<PathBuf>>)>,
 }
@@ -296,29 +297,58 @@ impl Eder {
             {
                 ui.ctx().copy_text(item.text.clone());
             }
-            for (index, name) in ["Yellow", "Green", "Blue", "Pink"].iter().enumerate() {
-                let response = ui
-                    .add(egui::Button::new("").min_size(Vec2::splat(28.0)))
-                    .on_hover_text(format!(
-                        "Highlight selected text in {}",
-                        name.to_lowercase()
-                    ));
-                paint_icon(
-                    ui.painter(),
-                    response.rect.shrink(5.0),
-                    UiIcon::Annotate,
-                    color(index as u8).to_opaque(),
-                );
-                if response.clicked() {
-                    self.send(Task::SaveAnnotation(
-                        path.clone(),
-                        Box::new(Annotation {
-                            color: Some(index as u8),
-                            ..item.clone()
-                        }),
-                    ));
-                }
+            let highlight_color = self.ui.annotations.highlight_color;
+            if icon_label_button(
+                ui,
+                UiIcon::Annotate,
+                "",
+                IconLabelStyle {
+                    size: Vec2::splat(32.0),
+                    fill: color(highlight_color).gamma_multiply(0.2),
+                    color: color(highlight_color).to_opaque(),
+                    text_size: 13.0,
+                    rounding: 6.0,
+                },
+            )
+            .on_hover_text("Highlight selected text")
+            .clicked()
+            {
+                self.send(Task::SaveAnnotation(
+                    path.clone(),
+                    Box::new(Annotation {
+                        color: Some(highlight_color),
+                        ..item.clone()
+                    }),
+                ));
             }
+
+            let color_names = ["Yellow", "Green", "Blue", "Pink"];
+            let chosen_color = color(highlight_color).to_opaque();
+            let color_button = ui.menu_button("", |menu| {
+                menu.spacing_mut().item_spacing = Vec2::new(8.0, 8.0);
+                menu.horizontal(|row| {
+                    for index in 0..4_u8 {
+                        let response = row
+                            .add(egui::Button::new("").min_size(Vec2::splat(30.0)))
+                            .on_hover_text(color_names[index as usize]);
+                        row.painter().circle_filled(
+                            response.rect.center(),
+                            8.0,
+                            color(index).to_opaque(),
+                        );
+                        if response.clicked() {
+                            self.ui.annotations.highlight_color = index;
+                            row.close_menu();
+                        }
+                    }
+                });
+            });
+            ui.painter()
+                .circle_filled(color_button.response.rect.center(), 8.0, chosen_color);
+            color_button
+                .response
+                .on_hover_text("Choose highlight color");
+
             let colors = reader_palette(ui.visuals());
             if icon_label_button(
                 ui,
