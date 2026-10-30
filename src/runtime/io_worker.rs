@@ -1,4 +1,35 @@
 use super::*;
+
+fn wait_after_storage_error(
+    rx: &Receiver<Task>,
+    tx: &SyncSender<Event>,
+    wake: &WakeUi,
+    stop: &AtomicBool,
+    shutdown: &Latest<Option<(PathBuf, ReadingPosition)>>,
+    closing: &AtomicBool,
+) {
+    while !stop.load(Ordering::Acquire) {
+        if let Some(position) = shutdown.try_take() {
+            closing.store(false, Ordering::Release);
+            let _ = deliver(
+                tx,
+                Event::ShutdownFailed(
+                    "Local storage is unavailable. Restart Eder after resolving the startup error."
+                        .into(),
+                ),
+                stop,
+                wake,
+            );
+            let _ = position;
+        }
+        match rx.recv_timeout(Duration::from_millis(25)) {
+            Ok(_) => {}
+            Err(mpsc::RecvTimeoutError::Timeout) => {}
+            Err(mpsc::RecvTimeoutError::Disconnected) => break,
+        }
+    }
+}
+
 use crate::{
     app::state::View,
     domain::{document::Entry, reading_position::ReadingPosition},
@@ -36,6 +67,7 @@ pub(super) fn run(data: Option<PathBuf>, worker: IoWorker) {
                 send(Event::Fatal(format!(
                     "Cannot create local data folder: {e}"
                 )));
+                wait_after_storage_error(&rx, &tx, &wake, &stop, &shutdown, &closing);
                 return;
             }
         },
@@ -43,6 +75,7 @@ pub(super) fn run(data: Option<PathBuf>, worker: IoWorker) {
             send(Event::Fatal(
                 "No local user-data directory is available.".into(),
             ));
+            wait_after_storage_error(&rx, &tx, &wake, &stop, &shutdown, &closing);
             return;
         }
     };
@@ -52,6 +85,7 @@ pub(super) fn run(data: Option<PathBuf>, worker: IoWorker) {
         Ok(lock) => lock,
         Err(error) => {
             send(Event::Fatal(error));
+            wait_after_storage_error(&rx, &tx, &wake, &stop, &shutdown, &closing);
             return;
         }
     };
@@ -59,6 +93,7 @@ pub(super) fn run(data: Option<PathBuf>, worker: IoWorker) {
         Ok(s) => PersistenceService::new(s),
         Err(e) => {
             send(Event::Fatal(format!("Cannot open local database: {e}")));
+            wait_after_storage_error(&rx, &tx, &wake, &stop, &shutdown, &closing);
             return;
         }
     };

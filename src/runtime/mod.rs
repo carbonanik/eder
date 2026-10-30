@@ -440,6 +440,30 @@ mod tests {
                 .unwrap();
     }
     #[test]
+    fn storage_initialization_failure_keeps_command_channel_connected() {
+        let dir = tempfile::tempdir().unwrap();
+        let blocked = dir.path().join("not-a-directory");
+        std::fs::write(&blocked, b"blocked").unwrap();
+        let runtime = RuntimeClient::start(
+            AppPaths {
+                data: Some(blocked),
+                cache: dir.path().join("cache"),
+            },
+            Arc::new(|| {}),
+            Arc::new(|pixels: crate::domain::pixels::Pixels| pixels),
+        );
+        loop {
+            match runtime.rx.recv_timeout(Duration::from_secs(5)).unwrap() {
+                Event::Fatal(message) => {
+                    assert!(message.contains("Cannot create local data folder"));
+                    break;
+                }
+                _ => {}
+            }
+        }
+        assert!(runtime.submit(Task::Dark(true)).is_ok());
+    }
+    #[test]
     fn runtime_shutdown_submission_remains_available_when_saturated() {
         let (runtime, _tasks) = RuntimeClient::<crate::domain::pixels::Pixels>::detached();
         for _ in 0..64 {

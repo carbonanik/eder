@@ -23,14 +23,18 @@ OUTPUT="$ROOT/target/appimage/eder-$VERSION-$ARCH.AppImage"
 APPDIR="$(mktemp -d "${TMPDIR:-/tmp}/eder-appimage.XXXXXX")"
 trap 'rm -rf "$APPDIR"' EXIT HUP INT TERM
 
-mkdir -p "$APPDIR/usr/bin" "$APPDIR/usr/share/applications" "$APPDIR/usr/share/icons/hicolor/scalable/apps" "$ROOT/target/appimage"
+mkdir -p "$APPDIR/usr/bin" "$APPDIR/usr/share/applications" "$APPDIR/usr/share/icons/hicolor/scalable/apps" "$APPDIR/usr/share/icons/hicolor/256x256/apps" "$ROOT/target/appimage"
 install -m 755 target/release/eder "$APPDIR/usr/bin/eder"
 install -m 755 packaging/appimage/AppRun "$APPDIR/AppRun"
 install -m 644 packaging/appimage/eder.desktop "$APPDIR/eder.desktop"
 install -m 644 packaging/appimage/eder.desktop "$APPDIR/usr/share/applications/eder.desktop"
 install -m 644 packaging/appimage/eder.svg "$APPDIR/eder.svg"
 install -m 644 packaging/appimage/eder.svg "$APPDIR/usr/share/icons/hicolor/scalable/apps/eder.svg"
-
+install -m 755 eder-landing/assets/eder-mark.png "$APPDIR/eder.png"
+install -m 755 eder-landing/assets/eder-mark.png "$APPDIR/usr/share/icons/hicolor/256x256/apps/eder.png"
+ln -s eder.png "$APPDIR/.DirIcon"
+chmod -R a+rX "$APPDIR"
+chmod a+rx "$APPDIR/AppRun"
 if [ "${APPIMAGETOOL##*.}" = AppImage ]; then
     "$APPIMAGETOOL" --appimage-extract-and-run "$APPDIR" "$OUTPUT"
 else
