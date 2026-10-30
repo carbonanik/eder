@@ -164,34 +164,39 @@ impl Eder {
                     return;
                 }
                 // Groups wrap as units on narrow windows, keeping navigation together.
-                ui.horizontal_wrapped(|ui| {
-                    toolbar_group(ui, |ui| self.reader_navigation_tools(ui));
-                    toolbar_group(ui, |ui| self.reader_zoom_tools(ui));
-                    toolbar_group(ui, |ui| self.annotation_tools(ui));
-                    toolbar_group(ui, |ui| {
-                        let mut dark = self.app.state.dark;
-                        if ui
-                            .checkbox(&mut dark, "Dark pages")
-                            .on_hover_text("Invert PDF page colors")
-                            .changed()
-                        {
-                            self.send(Task::Dark(dark));
-                        }
-                        let fullscreen = ui.input(|i| i.viewport().fullscreen.unwrap_or(false));
-                        if ui
-                            .button(if fullscreen {
-                                "Exit fullscreen"
-                            } else {
-                                "Fullscreen"
-                            })
-                            .on_hover_text("Toggle fullscreen (F11)")
-                            .clicked()
-                        {
-                            ui.ctx()
-                                .send_viewport_cmd(egui::ViewportCommand::Fullscreen(!fullscreen));
-                        }
-                    });
-                });
+                ui.with_layout(
+                    egui::Layout::left_to_right(egui::Align::Min).with_main_wrap(true),
+                    |ui| {
+                        toolbar_group(ui, |ui| self.reader_navigation_tools(ui));
+                        toolbar_group(ui, |ui| self.reader_zoom_tools(ui));
+                        toolbar_group(ui, |ui| self.annotation_tools(ui));
+                        toolbar_group(ui, |ui| {
+                            let mut dark = self.app.state.dark;
+                            if ui
+                                .checkbox(&mut dark, "Dark pages")
+                                .on_hover_text("Invert PDF page colors")
+                                .changed()
+                            {
+                                self.send(Task::Dark(dark));
+                            }
+                            let fullscreen = ui.input(|i| i.viewport().fullscreen.unwrap_or(false));
+                            if ui
+                                .button(if fullscreen {
+                                    "Exit fullscreen"
+                                } else {
+                                    "Fullscreen"
+                                })
+                                .on_hover_text("Toggle fullscreen (F11)")
+                                .clicked()
+                            {
+                                ui.ctx()
+                                    .send_viewport_cmd(egui::ViewportCommand::Fullscreen(
+                                        !fullscreen,
+                                    ));
+                            }
+                        });
+                    },
+                );
                 if self.ui.annotations.selection.is_some() && !self.ui.annotations.pan {
                     ui.horizontal_wrapped(|ui| {
                         ui.weak("Selected text");
