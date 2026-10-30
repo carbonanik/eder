@@ -167,15 +167,16 @@ impl Eder {
                             if icon_label_button(
                                 ui,
                                 UiIcon::ArrowLeft,
-                                "Back",
+                                "",
                                 IconLabelStyle {
-                                    size: Vec2::new(82.0, 32.0),
+                                    size: Vec2::new(32.0, 32.0),
                                     fill: colors.light,
                                     color: colors.ink,
                                     text_size: 13.0,
                                     rounding: 6.0,
                                 },
                             )
+                            .on_hover_text("Back to library")
                             .clicked()
                             {
                                 self.back();
@@ -191,16 +192,54 @@ impl Eder {
                             });
                         }
                         toolbar_group(ui, |ui| {
-                            if ui
-                                .selectable_label(self.ui.annotations.pages_open, "Pages")
-                                .on_hover_text("Toggle page navigation")
-                                .clicked()
+                            let colors = reader_palette(ui.visuals());
+                            if icon_label_button(
+                                ui,
+                                UiIcon::Page,
+                                "",
+                                IconLabelStyle {
+                                    size: Vec2::splat(32.0),
+                                    fill: if self.ui.annotations.pages_open {
+                                        colors.sage
+                                    } else {
+                                        Color32::TRANSPARENT
+                                    },
+                                    color: if self.ui.annotations.pages_open {
+                                        colors.teal
+                                    } else {
+                                        colors.ink
+                                    },
+                                    text_size: 13.0,
+                                    rounding: 6.0,
+                                },
+                            )
+                            .on_hover_text("Toggle page navigation")
+                            .clicked()
                             {
                                 self.ui.annotations.pages_open = !self.ui.annotations.pages_open;
                             }
-                            if ui
-                                .selectable_label(self.ui.annotations.open, "Annotations")
-                                .clicked()
+                            if icon_label_button(
+                                ui,
+                                UiIcon::Note,
+                                "",
+                                IconLabelStyle {
+                                    size: Vec2::splat(32.0),
+                                    fill: if self.ui.annotations.open {
+                                        colors.sage
+                                    } else {
+                                        Color32::TRANSPARENT
+                                    },
+                                    color: if self.ui.annotations.open {
+                                        colors.teal
+                                    } else {
+                                        colors.ink
+                                    },
+                                    text_size: 13.0,
+                                    rounding: 6.0,
+                                },
+                            )
+                            .on_hover_text("Toggle annotations")
+                            .clicked()
                             {
                                 self.ui.annotations.open = !self.ui.annotations.open;
                             }
@@ -211,13 +250,23 @@ impl Eder {
                                 }
                                 let fullscreen =
                                     ui.input(|i| i.viewport().fullscreen.unwrap_or(false));
-                                if ui
-                                    .button(if fullscreen {
+                                if icon_label_button(
+                                    ui,
+                                    UiIcon::Fullscreen,
+                                    if fullscreen {
                                         "Exit fullscreen"
                                     } else {
                                         "Fullscreen"
-                                    })
-                                    .clicked()
+                                    },
+                                    IconLabelStyle {
+                                        size: Vec2::new(160.0, 32.0),
+                                        fill: Color32::TRANSPARENT,
+                                        color: reader_palette(ui.visuals()).ink,
+                                        text_size: 13.0,
+                                        rounding: 6.0,
+                                    },
+                                )
+                                .clicked()
                                 {
                                     ui.ctx()
                                         .send_viewport_cmd(egui::ViewportCommand::Fullscreen(
@@ -277,10 +326,21 @@ impl Eder {
     }
 
     fn reader_zoom_tools(&mut self, ui: &mut egui::Ui) {
-        if ui
-            .button("−")
-            .on_hover_text("Zoom out (Ctrl/Cmd+−)")
-            .clicked()
+        let colors = reader_palette(ui.visuals());
+        if icon_label_button(
+            ui,
+            UiIcon::Minus,
+            "",
+            IconLabelStyle {
+                size: Vec2::splat(32.0),
+                fill: Color32::TRANSPARENT,
+                color: colors.ink,
+                text_size: 13.0,
+                rounding: 6.0,
+            },
+        )
+        .on_hover_text("Zoom out (Ctrl/Cmd+−)")
+        .clicked()
         {
             self.zoom_reader(-0.1, false);
         }
@@ -325,10 +385,20 @@ impl Eder {
         })
         .response
         .on_hover_text("Zoom presets and page fitting (Ctrl/Cmd+0 to reset)");
-        if ui
-            .button("+")
-            .on_hover_text("Zoom in (Ctrl/Cmd++)")
-            .clicked()
+        if icon_label_button(
+            ui,
+            UiIcon::Plus,
+            "",
+            IconLabelStyle {
+                size: Vec2::splat(32.0),
+                fill: Color32::TRANSPARENT,
+                color: colors.ink,
+                text_size: 13.0,
+                rounding: 6.0,
+            },
+        )
+        .on_hover_text("Zoom in (Ctrl/Cmd++)")
+        .clicked()
         {
             self.zoom_reader(0.1, false);
         }

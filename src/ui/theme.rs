@@ -98,6 +98,12 @@ pub(crate) enum UiIcon {
     ChevronRight,
     ArrowLeft,
     Plus,
+    Minus,
+    Hand,
+    Text,
+    Copy,
+    Page,
+    Fullscreen,
     Star,
     Close,
     Folder,
@@ -215,6 +221,59 @@ pub(crate) fn paint_icon(painter: &egui::Painter, rect: egui::Rect, icon: UiIcon
         UiIcon::Plus => {
             line(point(-0.65, 0.0), point(0.65, 0.0));
             line(point(0.0, -0.65), point(0.0, 0.65));
+        }
+        UiIcon::Minus => {
+            line(point(-0.65, 0.0), point(0.65, 0.0));
+        }
+        UiIcon::Hand => {
+            line(point(-0.45, 0.75), point(-0.45, 0.15));
+            line(point(-0.45, 0.15), point(-0.75, -0.15));
+            line(point(-0.75, -0.15), point(-0.65, -0.45));
+            line(point(-0.65, -0.45), point(-0.35, -0.2));
+            line(point(-0.35, -0.2), point(-0.35, -0.75));
+            line(point(-0.35, -0.75), point(-0.05, -0.75));
+            line(point(-0.05, -0.75), point(-0.05, -0.5));
+            line(point(-0.05, -0.5), point(0.25, -0.5));
+            line(point(0.25, -0.5), point(0.25, -0.75));
+            line(point(0.25, -0.75), point(0.55, -0.75));
+            line(point(0.55, -0.75), point(0.55, 0.15));
+            line(point(0.55, 0.15), point(0.75, 0.35));
+            line(point(0.75, 0.35), point(0.45, 0.75));
+            line(point(0.45, 0.75), point(-0.45, 0.75));
+        }
+        UiIcon::Text => {
+            line(point(-0.75, -0.75), point(0.75, -0.75));
+            line(point(0.0, -0.75), point(0.0, 0.75));
+            line(point(-0.35, 0.75), point(0.35, 0.75));
+        }
+        UiIcon::Copy => {
+            let back = egui::Rect::from_center_size(
+                point(-0.15, 0.15),
+                Vec2::new(half * 1.25, half * 1.55),
+            );
+            painter.rect_stroke(back, 1.5, stroke);
+            let front = egui::Rect::from_center_size(
+                point(0.15, -0.15),
+                Vec2::new(half * 1.25, half * 1.55),
+            );
+            painter.rect_stroke(front, 1.5, stroke);
+        }
+        UiIcon::Page => {
+            let page = egui::Rect::from_center_size(center, Vec2::new(half * 1.35, half * 1.75));
+            painter.rect_stroke(page, 1.5, stroke);
+            line(point(-0.35, -0.45), point(0.35, -0.45));
+            line(point(-0.35, -0.05), point(0.35, -0.05));
+            line(point(-0.35, 0.35), point(0.35, 0.35));
+        }
+        UiIcon::Fullscreen => {
+            line(point(-0.75, -0.25), point(-0.75, -0.75));
+            line(point(-0.75, -0.75), point(-0.25, -0.75));
+            line(point(0.25, -0.75), point(0.75, -0.75));
+            line(point(0.75, -0.75), point(0.75, -0.25));
+            line(point(0.75, 0.25), point(0.75, 0.75));
+            line(point(0.75, 0.75), point(0.25, 0.75));
+            line(point(-0.25, 0.75), point(-0.75, 0.75));
+            line(point(-0.75, 0.75), point(-0.75, 0.25));
         }
         UiIcon::Star => {
             let points = std::array::from_fn::<_, 11, _>(|step| {

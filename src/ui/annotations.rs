@@ -171,11 +171,57 @@ impl Eder {
             .iter()
             .find(|a| a.page == reader.page && a.color.is_none())
             .map(|a| a.id);
-        ui.selectable_value(&mut self.ui.annotations.pan, true, "Pan")
-            .on_hover_text("Drag the page to move around");
-        ui.selectable_value(&mut self.ui.annotations.pan, false, "Text")
-            .on_hover_text("Drag over text to select, copy, highlight or annotate");
         let colors = reader_palette(ui.visuals());
+        if icon_label_button(
+            ui,
+            UiIcon::Hand,
+            "",
+            IconLabelStyle {
+                size: Vec2::splat(32.0),
+                fill: if self.ui.annotations.pan {
+                    colors.sage
+                } else {
+                    Color32::TRANSPARENT
+                },
+                color: if self.ui.annotations.pan {
+                    colors.teal
+                } else {
+                    colors.ink
+                },
+                text_size: 13.0,
+                rounding: 6.0,
+            },
+        )
+        .on_hover_text("Pan mode: drag the page to move around")
+        .clicked()
+        {
+            self.ui.annotations.pan = true;
+        }
+        if icon_label_button(
+            ui,
+            UiIcon::Text,
+            "",
+            IconLabelStyle {
+                size: Vec2::splat(32.0),
+                fill: if !self.ui.annotations.pan {
+                    colors.sage
+                } else {
+                    Color32::TRANSPARENT
+                },
+                color: if !self.ui.annotations.pan {
+                    colors.teal
+                } else {
+                    colors.ink
+                },
+                text_size: 13.0,
+                rounding: 6.0,
+            },
+        )
+        .on_hover_text("Text selection mode")
+        .clicked()
+        {
+            self.ui.annotations.pan = false;
+        }
         if icon_label_button(
             ui,
             UiIcon::Bookmark,
@@ -232,7 +278,22 @@ impl Eder {
                 .map(|w| s.annotation(w, 0))
         });
         if let Some(item) = selected.filter(|_| !self.ui.annotations.pan) {
-            if ui.button("Copy text").clicked() {
+            let colors = reader_palette(ui.visuals());
+            if icon_label_button(
+                ui,
+                UiIcon::Copy,
+                "",
+                IconLabelStyle {
+                    size: Vec2::splat(32.0),
+                    fill: colors.light,
+                    color: colors.ink,
+                    text_size: 13.0,
+                    rounding: 6.0,
+                },
+            )
+            .on_hover_text("Copy selected text")
+            .clicked()
+            {
                 ui.ctx().copy_text(item.text.clone());
             }
             for (index, name) in ["Yellow", "Green", "Blue", "Pink"].iter().enumerate() {
@@ -262,15 +323,16 @@ impl Eder {
             if icon_label_button(
                 ui,
                 UiIcon::Note,
-                "Add note",
+                "",
                 IconLabelStyle {
-                    size: Vec2::new(96.0, 32.0),
+                    size: Vec2::splat(32.0),
                     fill: colors.light,
                     color: colors.ink,
                     text_size: 13.0,
                     rounding: 6.0,
                 },
             )
+            .on_hover_text("Add note")
             .clicked()
             {
                 self.ui.annotations.editing = Some(item);
