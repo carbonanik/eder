@@ -30,6 +30,9 @@ pub(crate) enum UiIcon {
     Annotate,
     Note,
     MoreVert,
+    Download,
+    Edit,
+    Delete,
 }
 
 impl UiIcon {
@@ -61,6 +64,9 @@ impl UiIcon {
             Self::Annotate => '\u{f097}',
             Self::Note => '\u{f1fc}',
             Self::MoreVert => '\u{e5d4}',
+            Self::Download => '\u{f090}',
+            Self::Edit => '\u{f097}',
+            Self::Delete => '\u{e872}',
         }
     }
 }

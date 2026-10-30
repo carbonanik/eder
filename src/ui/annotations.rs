@@ -405,69 +405,113 @@ impl Eder {
                 .show(ctx, |ui| {
                     reader_style(ui);
                     ui.spacing_mut().item_spacing = Vec2::new(8.0, 12.0);
+                    let colors = reader_palette(ui.visuals());
                     ui.horizontal(|ui| {
-                        if ui
-                            .selectable_label(self.ui.annotations.filter != 3, "Annotations")
-                            .clicked()
-                        {
-                            self.ui.annotations.filter = 0;
-                        }
-                        if ui
-                            .selectable_label(self.ui.annotations.filter == 3, "Notes")
-                            .clicked()
-                        {
-                            self.ui.annotations.filter = 3;
-                        }
+                        ui.label(
+                            RichText::new("Annotations")
+                                .size(16.0)
+                                .strong()
+                                .color(colors.ink),
+                        );
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            if ui
-                                .button("×")
-                                .on_hover_text("Close annotations (Ctrl/Cmd+Shift+A)")
-                                .clicked()
+                            if icon_label_button(
+                                ui,
+                                UiIcon::Close,
+                                "",
+                                IconLabelStyle {
+                                    size: Vec2::splat(32.0),
+                                    fill: Color32::TRANSPARENT,
+                                    color: colors.ink,
+                                    text_size: 13.0,
+                                    rounding: 6.0,
+                                },
+                            )
+                            .on_hover_text("Close annotations (Ctrl/Cmd+Shift+A)")
+                            .clicked()
                             {
                                 self.ui.annotations.open = false;
                             }
+                            ui.menu_button(
+                                egui::RichText::new(UiIcon::MoreVert.glyph().to_string()).font(
+                                    egui::FontId::new(
+                                        18.0,
+                                        egui::FontFamily::Name(MATERIAL_SYMBOLS_FONT.into()),
+                                    ),
+                                ),
+                                |menu| {
+                                    if icon_label_button(
+                                        menu,
+                                        UiIcon::Download,
+                                        "Export Markdown",
+                                        IconLabelStyle {
+                                            size: Vec2::new(180.0, 32.0),
+                                            fill: Color32::TRANSPARENT,
+                                            color: colors.ink,
+                                            text_size: 13.0,
+                                            rounding: 6.0,
+                                        },
+                                    )
+                                    .on_hover_text("Export annotations as Markdown")
+                                    .clicked()
+                                        && self.ui.annotations.export.is_none()
+                                    {
+                                        let path = self.app.reader.as_ref().unwrap().path.clone();
+                                        let (tx, rx) = std::sync::mpsc::channel();
+                                        let context = ctx.clone();
+                                        self.ui.annotations.export = Some((path, rx));
+                                        std::thread::spawn(move || {
+                                            let file = rfd::FileDialog::new()
+                                                .add_filter("Markdown", &["md"])
+                                                .set_file_name("annotations.md")
+                                                .save_file();
+                                            let _ = tx.send(file);
+                                            context.request_repaint();
+                                        });
+                                        menu.close_menu();
+                                    }
+                                },
+                            )
+                            .response
+                            .on_hover_text("Annotation menu");
                         });
                     });
-                    ui.horizontal_wrapped(|ui| {
-                        for (index, label) in [(0, "All"), (2, "Highlights"), (3, "Notes")] {
-                            let count = self
-                                .app
-                                .reader
-                                .as_ref()
-                                .unwrap()
-                                .annotations
-                                .iter()
-                                .filter(|a| match index {
-                                    1 => a.color.is_none(),
-                                    2 => a.color.is_some(),
-                                    3 => !a.note.is_empty(),
-                                    _ => true,
-                                })
-                                .count();
-                            ui.selectable_value(
-                                &mut self.ui.annotations.filter,
-                                index,
-                                format!("{label} {count}"),
-                            );
-                        }
-                    });
-                    if ui.button("Export as Markdown…").clicked()
-                        && self.ui.annotations.export.is_none()
-                    {
-                        let path = self.app.reader.as_ref().unwrap().path.clone();
-                        let (tx, rx) = std::sync::mpsc::channel();
-                        let context = ctx.clone();
-                        self.ui.annotations.export = Some((path, rx));
-                        std::thread::spawn(move || {
-                            let file = rfd::FileDialog::new()
-                                .add_filter("Markdown", &["md"])
-                                .set_file_name("annotations.md")
-                                .save_file();
-                            let _ = tx.send(file);
-                            context.request_repaint();
+                    ui.add_space(4.0);
+                    egui::Frame::none()
+                        .fill(colors.light)
+                        .rounding(7.0)
+                        .inner_margin(3.0)
+                        .show(ui, |ui| {
+                            ui.spacing_mut().item_spacing.x = 2.0;
+                            ui.horizontal(|ui| {
+                                for (index, label) in [(0, "All"), (2, "Highlights"), (3, "Notes")]
+                                {
+                                    let count = self
+                                        .app
+                                        .reader
+                                        .as_ref()
+                                        .unwrap()
+                                        .annotations
+                                        .iter()
+                                        .filter(|a| match index {
+                                            1 => a.color.is_none(),
+                                            2 => a.color.is_some(),
+                                            3 => !a.note.is_empty(),
+                                            _ => true,
+                                        })
+                                        .count();
+                                    if ui
+                                        .selectable_label(
+                                            self.ui.annotations.filter == index,
+                                            format!("{label}  {count}"),
+                                        )
+                                        .clicked()
+                                    {
+                                        self.ui.annotations.filter = index;
+                                    }
+                                }
+                            });
                         });
-                    }
-                    ui.separator();
+                    ui.add_space(8.0);
                     let reader = self.app.reader.as_ref().unwrap();
                     let path = reader.path.clone();
                     let items: Vec<_> = reader
@@ -530,34 +574,82 @@ impl Eder {
                                         ui.with_layout(
                                             egui::Layout::right_to_left(egui::Align::Center),
                                             |ui| {
-                                                ui.menu_button("⋮", |ui| {
-                                                    if item.color.is_some()
-                                                        && ui.button("Edit note / color").clicked()
-                                                    {
-                                                        self.ui.annotations.editing =
-                                                            Some(item.clone());
-                                                        ui.close_menu();
-                                                    }
-                                                    if !item.note.is_empty()
-                                                        && ui.button("Delete note").clicked()
-                                                    {
-                                                        self.send(Task::SaveAnnotation(
-                                                            path.clone(),
-                                                            Box::new(Annotation {
-                                                                note: String::new(),
-                                                                ..item.clone()
-                                                            }),
-                                                        ));
-                                                        ui.close_menu();
-                                                    }
-                                                    if ui.button("Delete annotation").clicked() {
-                                                        self.send(Task::DeleteAnnotation(
-                                                            path.clone(),
-                                                            item.id,
-                                                        ));
-                                                        ui.close_menu();
-                                                    }
-                                                })
+                                                ui.menu_button(
+                                                    egui::RichText::new(
+                                                        UiIcon::MoreVert.glyph().to_string(),
+                                                    )
+                                                    .font(egui::FontId::new(
+                                                        18.0,
+                                                        egui::FontFamily::Name(
+                                                            MATERIAL_SYMBOLS_FONT.into(),
+                                                        ),
+                                                    )),
+                                                    |ui| {
+                                                        if item.color.is_some()
+                                                            && icon_label_button(
+                                                                ui,
+                                                                UiIcon::Edit,
+                                                                "Edit note / color",
+                                                                IconLabelStyle {
+                                                                    size: Vec2::new(180.0, 32.0),
+                                                                    fill: Color32::TRANSPARENT,
+                                                                    color: colors.ink,
+                                                                    text_size: 13.0,
+                                                                    rounding: 6.0,
+                                                                },
+                                                            )
+                                                            .clicked()
+                                                        {
+                                                            self.ui.annotations.editing =
+                                                                Some(item.clone());
+                                                            ui.close_menu();
+                                                        }
+                                                        if !item.note.is_empty()
+                                                            && icon_label_button(
+                                                                ui,
+                                                                UiIcon::Delete,
+                                                                "Delete note",
+                                                                IconLabelStyle {
+                                                                    size: Vec2::new(180.0, 32.0),
+                                                                    fill: Color32::TRANSPARENT,
+                                                                    color: colors.ink,
+                                                                    text_size: 13.0,
+                                                                    rounding: 6.0,
+                                                                },
+                                                            )
+                                                            .clicked()
+                                                        {
+                                                            self.send(Task::SaveAnnotation(
+                                                                path.clone(),
+                                                                Box::new(Annotation {
+                                                                    note: String::new(),
+                                                                    ..item.clone()
+                                                                }),
+                                                            ));
+                                                            ui.close_menu();
+                                                        }
+                                                        if icon_label_button(
+                                                            ui,
+                                                            UiIcon::Delete,
+                                                            "Delete annotation",
+                                                            IconLabelStyle {
+                                                                size: Vec2::new(180.0, 32.0),
+                                                                fill: Color32::TRANSPARENT,
+                                                                color: colors.ink,
+                                                                text_size: 13.0,
+                                                                rounding: 6.0,
+                                                            },
+                                                        )
+                                                        .clicked()
+                                                        {
+                                                            self.send(Task::DeleteAnnotation(
+                                                                path.clone(),
+                                                                item.id,
+                                                            ));
+                                                            ui.close_menu();
+                                                        }
+                                                    },
+                                                )
                                                 .response
                                                 .on_hover_text("Annotation actions");
                                             },
