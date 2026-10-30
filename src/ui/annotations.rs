@@ -214,17 +214,18 @@ impl Eder {
                 ui.ctx().copy_text(item.text.clone());
             }
             for (index, name) in ["Yellow", "Green", "Blue", "Pink"].iter().enumerate() {
-                if ui
-                    .add(
-                        egui::Button::new(RichText::new("●").color(color(index as u8).to_opaque()))
-                            .min_size(Vec2::splat(28.0)),
-                    )
+                let response = ui
+                    .add(egui::Button::new("").min_size(Vec2::splat(28.0)))
                     .on_hover_text(format!(
                         "Highlight selected text in {}",
                         name.to_lowercase()
-                    ))
-                    .clicked()
-                {
+                    ));
+                ui.painter().circle_filled(
+                    response.rect.center(),
+                    9.0,
+                    color(index as u8).to_opaque(),
+                );
+                if response.clicked() {
                     self.send(Task::SaveAnnotation(
                         path.clone(),
                         Box::new(Annotation {

@@ -94,6 +94,7 @@ pub(crate) enum UiIcon {
     List,
     Refresh,
     Home,
+    ChevronLeft,
     ChevronRight,
     ArrowLeft,
     Plus,
@@ -197,6 +198,10 @@ pub(crate) fn paint_icon(painter: &egui::Painter, rect: egui::Rect, icon: UiIcon
             line(point(-0.65, 0.8), point(0.65, 0.8));
             line(point(-0.15, 0.8), point(-0.15, 0.2));
             line(point(0.15, 0.8), point(0.15, 0.2));
+        }
+        UiIcon::ChevronLeft => {
+            line(point(0.25, -0.65), point(-0.35, 0.0));
+            line(point(-0.35, 0.0), point(0.25, 0.65));
         }
         UiIcon::ChevronRight => {
             line(point(-0.25, -0.65), point(0.35, 0.0));

@@ -109,13 +109,18 @@ impl Eder {
                 ui.spacing_mut().button_padding = Vec2::new(9.0, 7.0);
                 ui.horizontal(|ui| {
                     ui.add(egui::Image::new(&self.ui.logo).fit_to_exact_size(Vec2::splat(24.0)));
-                    let back = icon_label_button(ui, UiIcon::ArrowLeft, "Back", IconLabelStyle {
-                        size: Vec2::new(80.0, 28.0),
-                        fill: ui.visuals().widgets.inactive.bg_fill,
-                        color: ui.visuals().text_color(),
-                        text_size: 14.0,
-                        rounding: 4.0,
-                    });
+                    let back = icon_label_button(
+                        ui,
+                        UiIcon::ArrowLeft,
+                        "Back",
+                        IconLabelStyle {
+                            size: Vec2::new(80.0, 28.0),
+                            fill: ui.visuals().widgets.inactive.bg_fill,
+                            color: ui.visuals().text_color(),
+                            text_size: 14.0,
+                            rounding: 4.0,
+                        },
+                    );
                     if back.clicked() {
                         self.back();
                     }
@@ -209,11 +214,19 @@ impl Eder {
     fn reader_navigation_tools(&mut self, ui: &mut egui::Ui) {
         let reader = self.app.reader.as_ref().unwrap();
         let (page, total) = (reader.page, reader.total);
-        if ui
-            .add_enabled(page > 1, egui::Button::new("‹"))
-            .on_hover_text("Previous page (←)")
-            .clicked()
-        {
+        let previous = ui
+            .add_enabled(
+                page > 1,
+                egui::Button::new("").min_size(egui::Vec2::splat(28.0)),
+            )
+            .on_hover_text("Previous page");
+        paint_icon(
+            ui.painter(),
+            previous.rect.shrink(4.0),
+            UiIcon::ChevronLeft,
+            ui.visuals().text_color(),
+        );
+        if previous.clicked() {
             self.turn(page - 1);
         }
         let mut jump = page;
@@ -229,11 +242,19 @@ impl Eder {
             self.turn(jump);
         }
         ui.weak(format!("/ {total}"));
-        if ui
-            .add_enabled(page < total, egui::Button::new("›"))
-            .on_hover_text("Next page (→)")
-            .clicked()
-        {
+        let next = ui
+            .add_enabled(
+                page < total,
+                egui::Button::new("").min_size(egui::Vec2::splat(28.0)),
+            )
+            .on_hover_text("Next page");
+        paint_icon(
+            ui.painter(),
+            next.rect.shrink(4.0),
+            UiIcon::ChevronRight,
+            ui.visuals().text_color(),
+        );
+        if next.clicked() {
             self.turn(page + 1);
         }
     }
@@ -653,6 +674,6 @@ fn toolbar_group(ui: &mut egui::Ui, content: impl FnOnce(&mut egui::Ui)) {
         .rounding(5.0)
         .inner_margin(egui::Margin::symmetric(5.0, 2.0))
         .show(ui, |ui| {
-            ui.horizontal(content);
+            ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), content);
         });
 }
