@@ -184,6 +184,12 @@ impl Eder {
                         toolbar_group(ui, |ui| self.reader_navigation_tools(ui));
                         toolbar_group(ui, |ui| self.reader_zoom_tools(ui));
                         toolbar_group(ui, |ui| self.annotation_tools(ui));
+                        if self.ui.annotations.selection.is_some() && !self.ui.annotations.pan {
+                            toolbar_group(ui, |ui| {
+                                ui.weak("Selected text");
+                                self.selection_tools(ui);
+                            });
+                        }
                         toolbar_group(ui, |ui| {
                             if ui
                                 .selectable_label(self.ui.annotations.pages_open, "Pages")
@@ -223,12 +229,6 @@ impl Eder {
                         });
                     },
                 );
-                if self.ui.annotations.selection.is_some() && !self.ui.annotations.pan {
-                    ui.horizontal_wrapped(|ui| {
-                        ui.weak("Selected text");
-                        self.selection_tools(ui);
-                    });
-                }
             });
     }
 
