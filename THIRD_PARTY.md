@@ -2,6 +2,14 @@
 
 Declared licenses and upstream license files for dependencies resolved for the Linux build. Platform-specific builds may resolve additional dependencies. Poppler is separately installed, not bundled.
 
+## Bundled assets
+
+| Asset | Source | Declared license |
+| --- | --- | --- |
+| Material Symbols Outlined font | https://github.com/google/material-design-icons | Apache-2.0 |
+
+The bundled font license is stored at `assets/fonts/LICENSE.txt`.
+
 | Crate | Version | Declared license |
 | --- | --- | --- |
 | ab_glyph | 0.2.32 | Apache-2.0 |

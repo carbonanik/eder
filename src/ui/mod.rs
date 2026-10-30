@@ -8,7 +8,10 @@ use std::{path::PathBuf, sync::atomic::Ordering};
 use theme::*;
 
 mod annotations;
+pub(crate) mod icons;
 mod library;
+use icons::*;
+
 mod navigation;
 mod reader;
 mod settings;
