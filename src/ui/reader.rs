@@ -106,7 +106,8 @@ impl Eder {
             )
             .show(ctx, |ui| {
                 reader_style(ui);
-                ui.spacing_mut().item_spacing = Vec2::new(6.0, 8.0);
+                toolbar_style(ui);
+                ui.spacing_mut().item_spacing = Vec2::new(6.0, 4.0);
                 ui.spacing_mut().button_padding = Vec2::new(8.0, 6.0);
                 ui.horizontal(|ui| {
                     ui.add(egui::Image::new(&self.ui.logo).fit_to_exact_size(Vec2::splat(24.0)));
@@ -162,17 +163,18 @@ impl Eder {
                     .response
                     .on_hover_text("Reader settings");
                 });
-                ui.add_space(2.0);
                 if self.app.reader.is_none() {
                     return;
                 }
                 // Groups wrap as units on narrow windows, keeping navigation together.
+                let wide_toolbar = ui.available_width() >= 680.0;
+                let group_gap = ((ui.available_width() - 620.0) / 2.0).max(12.0);
                 ui.with_layout(
                     egui::Layout::left_to_right(egui::Align::Min).with_main_wrap(true),
                     |ui| {
                         toolbar_group(ui, |ui| {
                             let colors = reader_palette(ui.visuals());
-                            if icon_label_button(
+                            if toolbar_icon_label_button(
                                 ui,
                                 UiIcon::ArrowLeft,
                                 "",
@@ -189,136 +191,131 @@ impl Eder {
                             {
                                 self.back();
                             }
+                            self.reader_navigation_tools(ui);
                         });
-                        ui.separator();
-                        toolbar_group(ui, |ui| self.reader_navigation_tools(ui));
-                        ui.separator();
+                        // Balance the three groups across wide windows; compact windows wrap.
+                        ui.add_space(group_gap);
                         toolbar_group(ui, |ui| self.reader_zoom_tools(ui));
-                        ui.separator();
-                        toolbar_group(ui, |ui| self.annotation_tools(ui));
-                        if self.ui.annotations.selection.is_some() && !self.ui.annotations.pan {
-                            ui.separator();
-                            toolbar_group(ui, |ui| {
-                                ui.weak("Selected text");
-                                self.selection_tools(ui);
-                            });
-                        }
-                        ui.separator();
-                        toolbar_group(ui, |ui| {
-                            let colors = reader_palette(ui.visuals());
-                            if icon_label_button(
-                                ui,
-                                UiIcon::Page,
-                                "",
-                                IconLabelStyle {
-                                    size: Vec2::splat(32.0),
-                                    fill: if self.ui.annotations.pages_open {
-                                        colors.sage
-                                    } else {
-                                        Color32::TRANSPARENT
-                                    },
-                                    color: if self.ui.annotations.pages_open {
-                                        colors.teal
-                                    } else {
-                                        colors.ink
-                                    },
-                                    text_size: 13.0,
-                                    rounding: 6.0,
-                                },
-                            )
-                            .on_hover_text("Toggle page navigation")
-                            .clicked()
-                            {
-                                self.ui.annotations.pages_open = !self.ui.annotations.pages_open;
-                            }
-                            if icon_label_button(
-                                ui,
-                                UiIcon::Note,
-                                "",
-                                IconLabelStyle {
-                                    size: Vec2::splat(32.0),
-                                    fill: if self.ui.annotations.open {
-                                        colors.sage
-                                    } else {
-                                        Color32::TRANSPARENT
-                                    },
-                                    color: if self.ui.annotations.open {
-                                        colors.teal
-                                    } else {
-                                        colors.ink
-                                    },
-                                    text_size: 13.0,
-                                    rounding: 6.0,
-                                },
-                            )
-                            .on_hover_text("Toggle annotations")
-                            .clicked()
-                            {
-                                self.ui.annotations.open = !self.ui.annotations.open;
-                            }
-                            ui.menu_button(
-                                egui::RichText::new(UiIcon::MoreVert.glyph().to_string()).font(
-                                    egui::FontId::new(
-                                        18.0,
-                                        egui::FontFamily::Name(MATERIAL_SYMBOLS_FONT.into()),
-                                    ),
-                                ),
+                        if wide_toolbar {
+                            ui.with_layout(
+                                egui::Layout::right_to_left(egui::Align::Center),
                                 |ui| {
-                                    let mut dark = self.app.state.dark;
-                                    if ui.checkbox(&mut dark, "Dark pages").changed() {
-                                        self.send(Task::Dark(dark));
-                                    }
-                                    let fullscreen =
-                                        ui.input(|i| i.viewport().fullscreen.unwrap_or(false));
-                                    if icon_label_button(
-                                        ui,
-                                        UiIcon::Fullscreen,
-                                        if fullscreen {
-                                            "Exit fullscreen"
-                                        } else {
-                                            "Fullscreen"
-                                        },
-                                        IconLabelStyle {
-                                            size: Vec2::new(160.0, 32.0),
-                                            fill: Color32::TRANSPARENT,
-                                            color: reader_palette(ui.visuals()).ink,
-                                            text_size: 13.0,
-                                            rounding: 6.0,
-                                        },
-                                    )
-                                    .clicked()
-                                    {
-                                        ui.ctx().send_viewport_cmd(
-                                            egui::ViewportCommand::Fullscreen(!fullscreen),
-                                        );
-                                        ui.close_menu();
-                                    }
+                                    ui.allocate_ui_with_layout(
+                                        Vec2::new(212.0, 34.0),
+                                        egui::Layout::left_to_right(egui::Align::Center),
+                                        |ui| self.reader_action_tools(ui),
+                                    );
                                 },
                             );
-                        });
+                        } else {
+                            self.reader_action_tools(ui);
+                        }
                     },
                 );
+                if self.ui.annotations.selection.is_some() && !self.ui.annotations.pan {
+                    ui.horizontal_wrapped(|ui| {
+                        ui.weak("Selected text");
+                        self.selection_tools(ui);
+                    });
+                }
             });
+    }
+
+    fn reader_action_tools(&mut self, ui: &mut egui::Ui) {
+        toolbar_group(ui, |ui| {
+            self.annotation_tools(ui);
+            let colors = reader_palette(ui.visuals());
+            if toolbar_icon_label_button(
+                ui,
+                UiIcon::Page,
+                "",
+                IconLabelStyle {
+                    size: Vec2::splat(32.0),
+                    fill: if self.ui.annotations.pages_open {
+                        colors.sage
+                    } else {
+                        Color32::TRANSPARENT
+                    },
+                    color: if self.ui.annotations.pages_open {
+                        colors.teal
+                    } else {
+                        colors.ink
+                    },
+                    text_size: 13.0,
+                    rounding: 6.0,
+                },
+            )
+            .on_hover_text("Toggle page navigation")
+            .clicked()
+            {
+                self.ui.annotations.pages_open = !self.ui.annotations.pages_open;
+            }
+            if toolbar_icon_label_button(
+                ui,
+                UiIcon::Note,
+                "",
+                IconLabelStyle {
+                    size: Vec2::splat(32.0),
+                    fill: if self.ui.annotations.open {
+                        colors.sage
+                    } else {
+                        Color32::TRANSPARENT
+                    },
+                    color: if self.ui.annotations.open {
+                        colors.teal
+                    } else {
+                        colors.ink
+                    },
+                    text_size: 13.0,
+                    rounding: 6.0,
+                },
+            )
+            .on_hover_text("Toggle annotations")
+            .clicked()
+            {
+                self.ui.annotations.open = !self.ui.annotations.open;
+            }
+            ui.menu_button(
+                egui::RichText::new(UiIcon::MoreVert.glyph().to_string()).font(egui::FontId::new(
+                    18.0,
+                    egui::FontFamily::Name(MATERIAL_SYMBOLS_FONT.into()),
+                )),
+                |ui| {
+                    let mut dark = self.app.state.dark;
+                    if ui.checkbox(&mut dark, "Dark pages").changed() {
+                        self.send(Task::Dark(dark));
+                    }
+                    let fullscreen = ui.input(|i| i.viewport().fullscreen.unwrap_or(false));
+                    if toolbar_icon_label_button(
+                        ui,
+                        UiIcon::Fullscreen,
+                        if fullscreen {
+                            "Exit fullscreen"
+                        } else {
+                            "Fullscreen"
+                        },
+                        IconLabelStyle {
+                            size: Vec2::new(160.0, 32.0),
+                            fill: Color32::TRANSPARENT,
+                            color: reader_palette(ui.visuals()).ink,
+                            text_size: 13.0,
+                            rounding: 6.0,
+                        },
+                    )
+                    .clicked()
+                    {
+                        ui.ctx()
+                            .send_viewport_cmd(egui::ViewportCommand::Fullscreen(!fullscreen));
+                        ui.close_menu();
+                    }
+                },
+            );
+        });
     }
 
     fn reader_navigation_tools(&mut self, ui: &mut egui::Ui) {
         let reader = self.app.reader.as_ref().unwrap();
         let (page, total) = (reader.page, reader.total);
-        let previous = ui
-            .add_enabled(
-                page > 1,
-                egui::Button::new("").min_size(egui::Vec2::splat(28.0)),
-            )
-            .on_hover_text("Previous page");
-        paint_icon(
-            ui.painter(),
-            previous.rect.shrink(4.0),
-            UiIcon::ChevronLeft,
-            ui.visuals().text_color(),
-        );
-        if previous.clicked() {
-            self.turn(page - 1);
-        }
         let mut jump = page;
         if ui
             .add_sized(
@@ -331,17 +328,40 @@ impl Eder {
             self.turn(jump);
         }
         ui.weak(format!("/ {total}"));
+        let previous = ui
+            .add_enabled(
+                page > 1,
+                egui::Button::new("").min_size(egui::Vec2::splat(32.0)),
+            )
+            .on_hover_text("Previous page");
+        paint_icon(
+            ui.painter(),
+            previous.rect.shrink(4.0),
+            UiIcon::ChevronLeft,
+            if previous.enabled() {
+                reader_palette(ui.visuals()).ink
+            } else {
+                reader_palette(ui.visuals()).muted
+            },
+        );
+        if previous.clicked() {
+            self.turn(page - 1);
+        }
         let next = ui
             .add_enabled(
                 page < total,
-                egui::Button::new("").min_size(egui::Vec2::splat(28.0)),
+                egui::Button::new("").min_size(egui::Vec2::splat(32.0)),
             )
             .on_hover_text("Next page");
         paint_icon(
             ui.painter(),
             next.rect.shrink(4.0),
             UiIcon::ChevronRight,
-            ui.visuals().text_color(),
+            if next.enabled() {
+                reader_palette(ui.visuals()).ink
+            } else {
+                reader_palette(ui.visuals()).muted
+            },
         );
         if next.clicked() {
             self.turn(page + 1);
@@ -350,7 +370,7 @@ impl Eder {
 
     fn reader_zoom_tools(&mut self, ui: &mut egui::Ui) {
         let colors = reader_palette(ui.visuals());
-        if icon_label_button(
+        if toolbar_icon_label_button(
             ui,
             UiIcon::Minus,
             "",
@@ -408,7 +428,7 @@ impl Eder {
         })
         .response
         .on_hover_text("Zoom presets and page fitting (Ctrl/Cmd+0 to reset)");
-        if icon_label_button(
+        if toolbar_icon_label_button(
             ui,
             UiIcon::Plus,
             "",
@@ -793,6 +813,27 @@ fn clicked_pdf_link(
         }
     }
     destination
+}
+
+fn toolbar_style(ui: &mut egui::Ui) {
+    let colors = reader_palette(ui.visuals());
+    let widgets = &mut ui.visuals_mut().widgets;
+    for widget in [
+        &mut widgets.inactive,
+        &mut widgets.hovered,
+        &mut widgets.active,
+    ] {
+        widget.bg_stroke = egui::Stroke::NONE;
+        widget.rounding = 4.0.into();
+        widget.expansion = 0.0;
+    }
+    widgets.noninteractive.bg_stroke = egui::Stroke::NONE;
+    widgets.inactive.bg_fill = Color32::TRANSPARENT;
+    widgets.inactive.weak_bg_fill = Color32::TRANSPARENT;
+    widgets.hovered.bg_fill = colors.hover;
+    widgets.hovered.weak_bg_fill = colors.hover;
+    widgets.active.bg_fill = colors.sage;
+    widgets.active.weak_bg_fill = colors.sage;
 }
 
 fn toolbar_group(ui: &mut egui::Ui, content: impl FnOnce(&mut egui::Ui)) {

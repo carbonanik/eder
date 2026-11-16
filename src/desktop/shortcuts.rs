@@ -444,6 +444,7 @@ mod tests {
         for width in [360.0, 1100.0] {
             for expanded in [false, true] {
                 let ctx = egui::Context::default();
+                crate::ui::icons::install(&ctx);
                 let (mut app, _tasks) = app(&ctx);
                 let (thumbnails, _thumbnail_jobs) = mpsc::sync_channel(12);
                 app.runtime.thumb_tx = thumbnails;

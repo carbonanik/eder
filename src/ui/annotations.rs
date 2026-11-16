@@ -173,7 +173,7 @@ impl Eder {
             .find(|a| a.page == reader.page && a.color.is_none())
             .map(|a| a.id);
         let colors = reader_palette(ui.visuals());
-        if icon_label_button(
+        if toolbar_icon_label_button(
             ui,
             UiIcon::Hand,
             "",
@@ -198,7 +198,7 @@ impl Eder {
         {
             self.ui.annotations.pan = true;
         }
-        if icon_label_button(
+        if toolbar_icon_label_button(
             ui,
             UiIcon::Text,
             "",
@@ -223,7 +223,7 @@ impl Eder {
         {
             self.ui.annotations.pan = false;
         }
-        if icon_label_button(
+        if toolbar_icon_label_button(
             ui,
             UiIcon::Bookmark,
             "",
@@ -280,7 +280,7 @@ impl Eder {
         });
         if let Some(item) = selected.filter(|_| !self.ui.annotations.pan) {
             let colors = reader_palette(ui.visuals());
-            if icon_label_button(
+            if toolbar_icon_label_button(
                 ui,
                 UiIcon::Copy,
                 "",
@@ -298,7 +298,7 @@ impl Eder {
                 ui.ctx().copy_text(item.text.clone());
             }
             let highlight_color = self.ui.annotations.highlight_color;
-            if icon_label_button(
+            if toolbar_icon_label_button(
                 ui,
                 UiIcon::Annotate,
                 "",
@@ -350,7 +350,7 @@ impl Eder {
                 .on_hover_text("Choose highlight color");
 
             let colors = reader_palette(ui.visuals());
-            if icon_label_button(
+            if toolbar_icon_label_button(
                 ui,
                 UiIcon::Note,
                 "",

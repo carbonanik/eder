@@ -100,6 +100,26 @@ pub(crate) fn icon_label_button(
     label: &str,
     style: IconLabelStyle,
 ) -> egui::Response {
+    icon_label_button_impl(ui, icon, label, style, false)
+}
+
+/// Flat reader controls reveal their hit area on hover or keyboard focus.
+pub(crate) fn toolbar_icon_label_button(
+    ui: &mut egui::Ui,
+    icon: UiIcon,
+    label: &str,
+    style: IconLabelStyle,
+) -> egui::Response {
+    icon_label_button_impl(ui, icon, label, style, true)
+}
+
+fn icon_label_button_impl(
+    ui: &mut egui::Ui,
+    icon: UiIcon,
+    label: &str,
+    style: IconLabelStyle,
+    flat: bool,
+) -> egui::Response {
     let response = ui.add(
         egui::Button::new(
             RichText::new(format!(
@@ -112,8 +132,23 @@ pub(crate) fn icon_label_button(
         )
         .min_size(style.size)
         .fill(style.fill)
-        .rounding(style.rounding),
+        .rounding(style.rounding)
+        .frame(!flat),
     );
+
+    if flat && (response.hovered() || response.has_focus() || response.is_pointer_button_down_on())
+    {
+        let colors = super::reader::reader_palette(ui.visuals());
+        ui.painter().rect_filled(
+            response.rect,
+            4.0,
+            if response.is_pointer_button_down_on() {
+                colors.sage
+            } else {
+                colors.hover
+            },
+        );
+    }
 
     let icon_size = 18.0_f32.min(style.size.y * 0.62);
     let icon_font = FontId::new(icon_size, FontFamily::Name(MATERIAL_SYMBOLS_FONT.into()));

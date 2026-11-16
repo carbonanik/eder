@@ -15,6 +15,7 @@ fn grid_columns_adapt_to_window_size() {
 #[test]
 fn compact_and_wide_layouts_virtualize_large_libraries() {
     let ctx = egui::Context::default();
+    crate::ui::icons::install(&ctx);
     let (runtime, _tasks) = RuntimeClient::detached();
     let root = PathBuf::from("/library");
     let mut app = Eder {
