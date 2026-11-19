@@ -1,7 +1,7 @@
 #!/bin/sh
 set -eu
 
-ROOT="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
+ROOT="$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)"
 APPIMAGETOOL="${APPIMAGETOOL:-appimagetool}"
 
 if ! command -v "$APPIMAGETOOL" >/dev/null 2>&1; then

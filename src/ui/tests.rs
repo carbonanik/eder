@@ -127,6 +127,8 @@ fn compact_and_wide_layouts_virtualize_large_libraries() {
             page: 1,
             start: 0,
             end: 0,
+            start_offset: 0,
+            end_offset: 13,
         });
         let mut selected_height = None;
         for frame in 0..16 {

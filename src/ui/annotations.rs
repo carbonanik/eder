@@ -23,6 +23,7 @@ impl AnnotationUi {
         let words = reader?.text.get(&selection.page)?;
         (selection.start.max(selection.end) < words.len())
             .then(|| selection.annotation(words, 0).text)
+            .filter(|text| !text.is_empty())
     }
 }
 #[derive(Clone)]
@@ -30,24 +31,85 @@ pub(crate) struct Selection {
     pub page: u32,
     pub start: usize,
     pub end: usize,
+    /// Character boundaries within the anchor and focus words (end exclusive).
+    pub start_offset: usize,
+    pub end_offset: usize,
 }
 impl Selection {
     fn annotation(&self, words: &[TextWord], color: u8) -> Annotation {
-        let selected = &words[self.start.min(self.end)..=self.start.max(self.end)];
+        let anchor = (self.start, self.start_offset);
+        let focus = (self.end, self.end_offset);
+        let (start, end) = (anchor.min(focus), anchor.max(focus));
+        let mut text = String::new();
+        let mut bounds = Vec::new();
+        for (index, word) in words.iter().enumerate().take(end.0 + 1).skip(start.0) {
+            let count = word.text.chars().count();
+            let from = if index == start.0 {
+                start.1.min(count)
+            } else {
+                0
+            };
+            let to = if index == end.0 {
+                end.1.min(count)
+            } else {
+                count
+            };
+            if from >= to {
+                continue;
+            }
+            if !text.is_empty() {
+                text.push(' ');
+            }
+            text.extend(word.text.chars().skip(from).take(to - from));
+            let [left, top, right, bottom] = word.bounds;
+            let width = right - left;
+            bounds.push([
+                left + width * from as f32 / count as f32,
+                top,
+                left + width * to as f32 / count as f32,
+                bottom,
+            ]);
+        }
         Annotation {
             id: 0,
             page: self.page,
-            text: selected
-                .iter()
-                .map(|w| w.text.as_str())
-                .collect::<Vec<_>>()
-                .join(" "),
+            text,
             note: String::new(),
             color: Some(color),
-            bounds: selected.iter().map(|w| w.bounds).collect(),
+            bounds: continuous_bounds(&bounds),
         }
     }
 }
+
+/// Join neighboring boxes on the same line, including their intervening spaces.
+/// Large gaps (such as separate columns) and separate lines stay separate.
+fn continuous_bounds(bounds: &[[f32; 4]]) -> Vec<[f32; 4]> {
+    let mut lines: Vec<[f32; 4]> = Vec::new();
+    for &next in bounds {
+        if let Some(last) = lines.last_mut() {
+            let height = (last[3] - last[1]).min(next[3] - next[1]);
+            let overlap = last[3].min(next[3]) - last[1].max(next[1]);
+            let gap = (next[0] - last[2]).max(last[0] - next[2]);
+            if overlap >= height * 0.5 && gap <= height * 2.0 {
+                last[0] = last[0].min(next[0]);
+                last[1] = last[1].min(next[1]);
+                last[2] = last[2].max(next[2]);
+                last[3] = last[3].max(next[3]);
+                continue;
+            }
+        }
+        lines.push(next);
+    }
+    lines
+}
+
+fn character_offset(page: egui::Rect, word: &TextWord, pos: egui::Pos2) -> usize {
+    let rect = word_rect(page, word.bounds);
+    // Poppler supplies word bounds; interpolate character boundaries within them.
+    let fraction = ((pos.x - rect.left()) / rect.width()).clamp(0.0, 1.0);
+    (fraction * word.text.chars().count() as f32).round() as usize
+}
+
 fn color(index: u8) -> Color32 {
     let [r, g, b] = match index {
         1 => [90, 210, 130],
@@ -75,7 +137,7 @@ pub(crate) fn text_overlay(
 ) {
     for item in annotations.iter().filter(|a| a.page == page) {
         if let Some(c) = item.color {
-            for &bounds in &item.bounds {
+            for bounds in continuous_bounds(&item.bounds) {
                 ui.painter()
                     .rect_filled(word_rect(rect, bounds), 0.0, color(c));
             }
@@ -112,11 +174,17 @@ pub(crate) fn text_overlay(
         ui.ctx().set_cursor_icon(egui::CursorIcon::Text);
     }
     if response.drag_started() {
-        if let Some(index) = ui.input(|i| i.pointer.press_origin()).and_then(hit) {
+        if let Some((index, pos)) = ui
+            .input(|i| i.pointer.press_origin())
+            .and_then(|pos| hit(pos).map(|index| (index, pos)))
+        {
+            let offset = character_offset(rect, &words[index], pos);
             *selection = Some(Selection {
                 page,
                 start: index,
                 end: index,
+                start_offset: offset,
+                end_offset: offset,
             });
         } else {
             *selection = None;
@@ -134,10 +202,11 @@ pub(crate) fn text_overlay(
                     .total_cmp(&word_rect(rect, b.bounds).distance_to_pos(pos))
             }) {
                 selected.end = index;
+                selected.end_offset = character_offset(rect, &words[index], pos);
             }
         }
     }
-    if response.clicked() || response.double_clicked() {
+    if response.double_clicked() {
         *selection = response
             .interact_pointer_pos()
             .and_then(hit)
@@ -145,16 +214,16 @@ pub(crate) fn text_overlay(
                 page,
                 start: index,
                 end: index,
+                start_offset: 0,
+                end_offset: words[index].text.chars().count(),
             });
+    } else if response.clicked() {
+        *selection = None;
     }
     if let Some(selected) = selection.as_ref().filter(|s| s.page == page) {
-        for word in words
-            .iter()
-            .take(selected.start.max(selected.end) + 1)
-            .skip(selected.start.min(selected.end))
-        {
+        for bounds in selected.annotation(words, 0).bounds {
             ui.painter().rect_filled(
-                word_rect(rect, word.bounds),
+                word_rect(rect, bounds),
                 0.0,
                 Color32::from_rgba_unmultiplied(50, 130, 240, 90),
             );
@@ -278,7 +347,9 @@ impl Eder {
                 .filter(|w| s.start.max(s.end) < w.len())
                 .map(|w| s.annotation(w, 0))
         });
-        if let Some(item) = selected.filter(|_| !self.ui.annotations.pan) {
+        if let Some(item) =
+            selected.filter(|item| !self.ui.annotations.pan && !item.text.is_empty())
+        {
             let colors = reader_palette(ui.visuals());
             if toolbar_icon_label_button(
                 ui,
@@ -736,7 +807,44 @@ impl Eder {
 mod tests {
     use super::*;
     #[test]
-    fn drag_selects_words_in_both_directions_at_different_scales() {
+    fn partial_unicode_selection_copies_and_highlights_in_both_directions() {
+        let words = [TextWord {
+            text: "aé😀bc".into(),
+            bounds: [0.1, 0.1, 0.6, 0.2],
+        }];
+        for (start_offset, end_offset) in [(1, 3), (3, 1)] {
+            let item = Selection {
+                page: 1,
+                start: 0,
+                end: 0,
+                start_offset,
+                end_offset,
+            }
+            .annotation(&words, 0);
+            assert_eq!(item.text, "é😀");
+            assert_eq!(item.bounds.len(), 1);
+            assert!((item.bounds[0][0] - 0.2).abs() < 0.00001);
+            assert!((item.bounds[0][2] - 0.4).abs() < 0.00001);
+            assert!(item.validate().is_ok());
+        }
+    }
+
+    #[test]
+    fn highlight_connects_spaces_but_keeps_lines_and_columns_separate() {
+        let bounds = [
+            [0.1, 0.1, 0.2, 0.12],
+            [0.21, 0.1, 0.3, 0.12],
+            [0.1, 0.15, 0.25, 0.17],
+            [0.7, 0.15, 0.8, 0.17],
+        ];
+        assert_eq!(
+            continuous_bounds(&bounds),
+            vec![[0.1, 0.1, 0.3, 0.12], bounds[2], bounds[3],]
+        );
+    }
+
+    #[test]
+    fn drag_selects_characters_at_different_scales() {
         let words = vec![
             TextWord {
                 text: "Hello".into(),
@@ -747,13 +855,18 @@ mod tests {
                 bounds: [0.4, 0.1, 0.6, 0.2],
             },
         ];
-        for scale in [1.0, 2.0] {
+        for (scale, reverse) in [(1.0, false), (1.0, true), (2.0, false), (2.0, true)] {
             let ctx = egui::Context::default();
             let rect =
                 egui::Rect::from_min_size(egui::pos2(30.0, 30.0), Vec2::new(200.0, 300.0) * scale);
             let mut selection = None;
             let first = word_rect(rect, words[0].bounds).center();
             let last = word_rect(rect, words[1].bounds).center();
+            let (origin, focus) = if reverse {
+                (last, first)
+            } else {
+                (first, last)
+            };
             let mut frame = |events: Vec<egui::Event>| {
                 let input = egui::RawInput {
                     screen_rect: Some(egui::Rect::from_min_size(
@@ -771,24 +884,24 @@ mod tests {
             };
             frame(vec![]);
             frame(vec![
-                egui::Event::PointerMoved(last),
+                egui::Event::PointerMoved(origin),
                 egui::Event::PointerButton {
-                    pos: last,
+                    pos: origin,
                     button: egui::PointerButton::Primary,
                     pressed: true,
                     modifiers: Default::default(),
                 },
             ]);
-            frame(vec![egui::Event::PointerMoved(first)]);
+            frame(vec![egui::Event::PointerMoved(focus)]);
             frame(vec![egui::Event::PointerButton {
-                pos: first,
+                pos: focus,
                 button: egui::PointerButton::Primary,
                 pressed: false,
                 modifiers: Default::default(),
             }]);
             let selected = selection.unwrap().annotation(&words, 2);
-            assert_eq!(selected.text, "Hello world");
-            assert_eq!(selected.bounds.len(), 2);
+            assert_eq!(selected.text, "lo wor");
+            assert_eq!(selected.bounds.len(), 1);
         }
     }
 }
