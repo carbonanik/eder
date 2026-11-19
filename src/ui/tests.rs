@@ -114,7 +114,50 @@ fn compact_and_wide_layouts_virtualize_large_libraries() {
         horizontal: 0.0,
         layout: None,
     });
-    let _ = ctx.run(egui::RawInput::default(), |ctx| app.reader_ui(ctx));
+    // Render repeated frames to catch panel-height feedback after selecting text.
+    app.app.reader.as_mut().unwrap().text.insert(
+        1,
+        vec![crate::domain::annotation::TextWord {
+            text: "Selected word".into(),
+            bounds: [0.1, 0.1, 0.3, 0.2],
+        }],
+    );
+    for width in [360.0, 1100.0] {
+        app.ui.annotations.selection = Some(crate::ui::annotations::Selection {
+            page: 1,
+            start: 0,
+            end: 0,
+        });
+        let mut selected_height = None;
+        for frame in 0..16 {
+            let _ = ctx.run(
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        Vec2::new(width, 760.0),
+                    )),
+                    ..Default::default()
+                },
+                |ctx| {
+                    app.reader_ui(ctx);
+                    if frame >= 3 {
+                        let height = ctx.available_rect().top();
+                        assert!(
+                            height < 380.0,
+                            "Toolbar must leave room for the PDF at width {width}"
+                        );
+                        let initial = *selected_height.get_or_insert(height);
+                        assert!(
+                            (height - initial).abs() < 1.0,
+                            "Selection must not grow the toolbar across frames at width {width}: {initial} -> {height}"
+                        );
+                    }
+                },
+            );
+        }
+    }
+    app.ui.annotations.selection = None;
+    app.app.reader.as_mut().unwrap().text.clear();
     app.turn(999);
     assert_eq!(app.app.reader.as_ref().unwrap().page, 3);
     app.turn(0);

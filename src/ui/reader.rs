@@ -169,49 +169,48 @@ impl Eder {
                 // Groups wrap as units on narrow windows, keeping navigation together.
                 let wide_toolbar = ui.available_width() >= 680.0;
                 let group_gap = ((ui.available_width() - 620.0) / 2.0).max(12.0);
-                ui.with_layout(
-                    egui::Layout::left_to_right(egui::Align::Min).with_main_wrap(true),
-                    |ui| {
-                        toolbar_group(ui, |ui| {
-                            let colors = reader_palette(ui.visuals());
-                            if toolbar_icon_label_button(
-                                ui,
-                                UiIcon::ArrowLeft,
-                                "",
-                                IconLabelStyle {
-                                    size: Vec2::new(32.0, 32.0),
-                                    fill: Color32::TRANSPARENT,
-                                    color: colors.ink,
-                                    text_size: 13.0,
-                                    rounding: 6.0,
-                                },
-                            )
-                            .on_hover_text("Back to library")
-                            .clicked()
-                            {
-                                self.back();
-                            }
-                            self.reader_navigation_tools(ui);
-                        });
-                        // Balance the three groups across wide windows; compact windows wrap.
-                        ui.add_space(group_gap);
-                        toolbar_group(ui, |ui| self.reader_zoom_tools(ui));
-                        if wide_toolbar {
-                            ui.with_layout(
-                                egui::Layout::right_to_left(egui::Align::Center),
-                                |ui| {
-                                    ui.allocate_ui_with_layout(
-                                        Vec2::new(212.0, 34.0),
-                                        egui::Layout::left_to_right(egui::Align::Center),
-                                        |ui| self.reader_action_tools(ui),
-                                    );
-                                },
-                            );
-                        } else {
-                            self.reader_action_tools(ui);
+                // Size this row from its contents so the selection row below cannot
+                // feed the panel's previous height back into the next frame.
+                ui.horizontal_wrapped(|ui| {
+                    toolbar_group(ui, |ui| {
+                        let colors = reader_palette(ui.visuals());
+                        if toolbar_icon_label_button(
+                            ui,
+                            UiIcon::ArrowLeft,
+                            "",
+                            IconLabelStyle {
+                                size: Vec2::new(32.0, 32.0),
+                                fill: Color32::TRANSPARENT,
+                                color: colors.ink,
+                                text_size: 13.0,
+                                rounding: 6.0,
+                            },
+                        )
+                        .on_hover_text("Back to library")
+                        .clicked()
+                        {
+                            self.back();
                         }
-                    },
-                );
+                        self.reader_navigation_tools(ui);
+                    });
+                    // Balance the three groups across wide windows; compact windows wrap.
+                    ui.add_space(group_gap);
+                    toolbar_group(ui, |ui| self.reader_zoom_tools(ui));
+                    if wide_toolbar {
+                        ui.with_layout(
+                            egui::Layout::right_to_left(egui::Align::Center),
+                            |ui| {
+                                ui.allocate_ui_with_layout(
+                                    Vec2::new(212.0, 34.0),
+                                    egui::Layout::left_to_right(egui::Align::Center),
+                                    |ui| self.reader_action_tools(ui),
+                                );
+                            },
+                        );
+                    } else {
+                        self.reader_action_tools(ui);
+                    }
+                });
                 if self.ui.annotations.selection.is_some() && !self.ui.annotations.pan {
                     ui.horizontal_wrapped(|ui| {
                         ui.weak("Selected text");

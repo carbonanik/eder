@@ -7,7 +7,7 @@ use eframe::egui::{self, Color32, RichText, TextureHandle, Vec2};
 use std::{path::PathBuf, sync::atomic::Ordering};
 use theme::*;
 
-mod annotations;
+pub(crate) mod annotations;
 pub(crate) mod icons;
 mod library;
 use icons::*;
