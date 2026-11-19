@@ -93,6 +93,7 @@ impl Eder {
                     }
                 }
             });
+        self.selection_toolbar(ctx);
         if let Some(target) = internal_jump {
             self.turn(target);
         }
@@ -169,8 +170,6 @@ impl Eder {
                 // Groups wrap as units on narrow windows, keeping navigation together.
                 let wide_toolbar = ui.available_width() >= 680.0;
                 let group_gap = ((ui.available_width() - 620.0) / 2.0).max(12.0);
-                // Size this row from its contents so the selection row below cannot
-                // feed the panel's previous height back into the next frame.
                 ui.horizontal_wrapped(|ui| {
                     toolbar_group(ui, |ui| {
                         let colors = reader_palette(ui.visuals());
@@ -211,12 +210,41 @@ impl Eder {
                         self.reader_action_tools(ui);
                     }
                 });
-                if self.ui.annotations.selection.is_some() && !self.ui.annotations.pan {
-                    ui.horizontal_wrapped(|ui| {
-                        ui.weak("Selected text");
-                        self.selection_tools(ui);
+            });
+    }
+
+    fn selection_toolbar(&mut self, ctx: &egui::Context) {
+        if self.ui.annotations.pan
+            || self
+                .ui
+                .annotations
+                .selected_text(self.app.reader.as_ref())
+                .is_none()
+        {
+            return;
+        }
+
+        let colors = reader_palette(&ctx.style().visuals);
+        egui::Area::new(egui::Id::new("reader_selection_tools"))
+            .order(egui::Order::Foreground)
+            .anchor(egui::Align2::CENTER_BOTTOM, Vec2::new(0.0, -20.0))
+            .show(ctx, |ui| {
+                reader_style(ui);
+                toolbar_style(ui);
+                ui.spacing_mut().item_spacing = Vec2::new(6.0, 4.0);
+                ui.spacing_mut().button_padding = Vec2::new(8.0, 6.0);
+                egui::Frame::none()
+                    .fill(colors.paper)
+                    .stroke(egui::Stroke::new(1.0_f32, colors.hairline))
+                    .rounding(8.0)
+                    .inner_margin(egui::Margin::symmetric(8.0, 6.0))
+                    .show(ui, |ui| {
+                        ui.horizontal(|ui| {
+                            ui.weak("Selected text");
+                            ui.separator();
+                            self.selection_tools(ui);
+                        });
                     });
-                }
             });
     }
 
