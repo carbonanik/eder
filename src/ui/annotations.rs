@@ -14,6 +14,8 @@ pub(crate) struct AnnotationUi {
     pub filter: usize,
     pub selection: Option<Selection>,
     pub highlight_color: u8,
+    pub hovered_highlight: Option<(i64, usize)>,
+    pub remove_highlight: Option<i64>,
     pub editing: Option<Annotation>,
     pub export: Option<(PathBuf, std::sync::mpsc::Receiver<Option<PathBuf>>)>,
 }
@@ -133,13 +135,17 @@ pub(crate) fn text_overlay(
     words: &[TextWord],
     annotations: &[Annotation],
     selection: &mut Option<Selection>,
+    hovered_highlight: &mut Option<(i64, usize)>,
+    remove_highlight: &mut Option<i64>,
     pan: bool,
 ) {
+    let mut highlight_segments = Vec::new();
     for item in annotations.iter().filter(|a| a.page == page) {
         if let Some(c) = item.color {
-            for bounds in continuous_bounds(&item.bounds) {
-                ui.painter()
-                    .rect_filled(word_rect(rect, bounds), 0.0, color(c));
+            for (index, bounds) in continuous_bounds(&item.bounds).into_iter().enumerate() {
+                let highlight_rect = word_rect(rect, bounds);
+                ui.painter().rect_filled(highlight_rect, 0.0, color(c));
+                highlight_segments.push((item.id, index, highlight_rect, item.note.as_str()));
             }
         }
     }
@@ -165,6 +171,36 @@ pub(crate) fn text_overlay(
         ui.id().with(("pdf-text", page)),
         egui::Sense::click_and_drag(),
     );
+    for (id, index, bounds, note) in &highlight_segments {
+        let response = ui.interact(
+            bounds.intersect(ui.clip_rect()),
+            ui.id().with(("highlight-hover", page, id, index)),
+            egui::Sense::hover(),
+        );
+        if !note.is_empty() {
+            response.on_hover_text(*note);
+        }
+    }
+    let pointer = ui.input(|input| input.pointer.hover_pos());
+    let direct_hover = pointer.and_then(|pos| {
+        highlight_segments
+            .iter()
+            .find(|(_, _, bounds, _)| bounds.contains(pos))
+            .map(|(id, index, _, _)| (*id, *index))
+    });
+    let retained_hover = hovered_highlight.and_then(|(id, index)| {
+        let (_, _, bounds, _) =
+            highlight_segments
+                .iter()
+                .find(|(candidate_id, candidate_index, _, _)| {
+                    *candidate_id == id && *candidate_index == index
+                })?;
+        let button_rect = highlight_remove_button_rect(rect, *bounds);
+        pointer
+            .is_some_and(|pos| bounds.expand(32.0).contains(pos) || button_rect.contains(pos))
+            .then_some((id, index))
+    });
+    *hovered_highlight = direct_hover.or(retained_hover);
     let hit = |pos: egui::Pos2| {
         words
             .iter()
@@ -229,6 +265,38 @@ pub(crate) fn text_overlay(
             );
         }
     }
+    if let Some((id, index)) = *hovered_highlight {
+        if let Some((_, _, bounds, _)) =
+            highlight_segments
+                .iter()
+                .find(|(candidate_id, candidate_index, _, _)| {
+                    *candidate_id == id && *candidate_index == index
+                })
+        {
+            let response = ui.put(
+                highlight_remove_button_rect(rect, *bounds),
+                egui::Button::new(RichText::new(UiIcon::Delete.glyph().to_string()).font(
+                    egui::FontId::new(16.0, egui::FontFamily::Name(MATERIAL_SYMBOLS_FONT.into())),
+                )),
+            );
+            if response.on_hover_text("Remove highlight").clicked() {
+                *remove_highlight = Some(id);
+                *hovered_highlight = None;
+            }
+        }
+    }
+}
+
+fn highlight_remove_button_rect(page: egui::Rect, bounds: egui::Rect) -> egui::Rect {
+    let size = Vec2::splat(24.0);
+    let min = egui::pos2(bounds.right() + 4.0, bounds.top() - 4.0);
+    let min = egui::pos2(
+        min.x
+            .clamp(page.left(), (page.right() - size.x).max(page.left())),
+        min.y
+            .clamp(page.top(), (page.bottom() - size.y).max(page.top())),
+    );
+    egui::Rect::from_min_size(min, size)
 }
 impl Eder {
     pub(crate) fn annotation_tools(&mut self, ui: &mut egui::Ui) {
@@ -844,6 +912,121 @@ mod tests {
     }
 
     #[test]
+    fn remove_button_stays_next_to_highlight_within_page_bounds() {
+        let page = egui::Rect::from_min_size(egui::pos2(10.0, 20.0), Vec2::new(200.0, 300.0));
+        let highlight = egui::Rect::from_min_max(egui::pos2(40.0, 80.0), egui::pos2(90.0, 100.0));
+        let button = highlight_remove_button_rect(page, highlight);
+        assert!(page.contains(button.min));
+        assert!(page.contains(button.max));
+        assert_eq!(button.size(), Vec2::splat(24.0));
+    }
+
+    #[test]
+    fn hovering_highlight_shows_remove_button_and_click_marks_it_for_deletion() {
+        fn frame(
+            ctx: &egui::Context,
+            rect: egui::Rect,
+            words: &[TextWord],
+            annotations: &[Annotation],
+            selection: &mut Option<Selection>,
+            hovered: &mut Option<(i64, usize)>,
+            remove: &mut Option<i64>,
+            events: Vec<egui::Event>,
+        ) {
+            let input = egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    Vec2::splat(1000.0),
+                )),
+                events,
+                ..Default::default()
+            };
+            let _ = ctx.run(input, |ctx| {
+                egui::CentralPanel::default().show(ctx, |ui| {
+                    text_overlay(
+                        ui,
+                        rect,
+                        1,
+                        words,
+                        annotations,
+                        selection,
+                        hovered,
+                        remove,
+                        false,
+                    );
+                });
+            });
+        }
+
+        let ctx = egui::Context::default();
+        crate::ui::icons::install(&ctx);
+        let rect = egui::Rect::from_min_size(egui::pos2(30.0, 30.0), Vec2::new(200.0, 300.0));
+        let words = [TextWord {
+            text: "hello".into(),
+            bounds: [0.1, 0.1, 0.5, 0.2],
+        }];
+        let annotations = [Annotation {
+            id: 41,
+            page: 1,
+            text: "hello".into(),
+            note: "A useful note".into(),
+            color: Some(0),
+            bounds: vec![words[0].bounds],
+        }];
+        let highlight_rect = word_rect(rect, words[0].bounds);
+        let button_rect = highlight_remove_button_rect(rect, highlight_rect);
+        let mut selection = None;
+        let mut hovered = None;
+        let mut remove = None;
+
+        frame(
+            &ctx,
+            rect,
+            &words,
+            &annotations,
+            &mut selection,
+            &mut hovered,
+            &mut remove,
+            vec![egui::Event::PointerMoved(highlight_rect.center())],
+        );
+        assert_eq!(hovered, Some((41, 0)));
+        frame(
+            &ctx,
+            rect,
+            &words,
+            &annotations,
+            &mut selection,
+            &mut hovered,
+            &mut remove,
+            vec![
+                egui::Event::PointerMoved(button_rect.center()),
+                egui::Event::PointerButton {
+                    pos: button_rect.center(),
+                    button: egui::PointerButton::Primary,
+                    pressed: true,
+                    modifiers: Default::default(),
+                },
+            ],
+        );
+        frame(
+            &ctx,
+            rect,
+            &words,
+            &annotations,
+            &mut selection,
+            &mut hovered,
+            &mut remove,
+            vec![egui::Event::PointerButton {
+                pos: button_rect.center(),
+                button: egui::PointerButton::Primary,
+                pressed: false,
+                modifiers: Default::default(),
+            }],
+        );
+        assert_eq!(remove, Some(41));
+    }
+
+    #[test]
     fn drag_selects_characters_at_different_scales() {
         let words = vec![
             TextWord {
@@ -855,8 +1038,17 @@ mod tests {
                 bounds: [0.4, 0.1, 0.6, 0.2],
             },
         ];
+        let annotations = [Annotation {
+            id: 1,
+            page: 1,
+            text: "Hello".into(),
+            note: "A note".into(),
+            color: Some(0),
+            bounds: vec![words[0].bounds],
+        }];
         for (scale, reverse) in [(1.0, false), (1.0, true), (2.0, false), (2.0, true)] {
             let ctx = egui::Context::default();
+            crate::ui::icons::install(&ctx);
             let rect =
                 egui::Rect::from_min_size(egui::pos2(30.0, 30.0), Vec2::new(200.0, 300.0) * scale);
             let mut selection = None;
@@ -878,7 +1070,17 @@ mod tests {
                 };
                 let _ = ctx.run(input, |ctx| {
                     egui::CentralPanel::default().show(ctx, |ui| {
-                        text_overlay(ui, rect, 1, &words, &[], &mut selection, false);
+                        text_overlay(
+                            ui,
+                            rect,
+                            1,
+                            &words,
+                            &annotations,
+                            &mut selection,
+                            &mut None,
+                            &mut None,
+                            false,
+                        );
                     });
                 });
             };

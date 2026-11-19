@@ -1,3 +1,4 @@
+use crate::services::ports::LibraryRepository;
 use rusqlite::{params, Connection, OptionalExtension};
 use std::path::{Path, PathBuf};
 
@@ -224,6 +225,18 @@ impl crate::services::ports::LibraryRepository for Store {
         item: &crate::domain::annotation::Annotation,
     ) -> Result<(), String> {
         item.validate()?;
+        if item.id == 0
+            && item.color.is_some()
+            && LibraryRepository::annotations(self, path)?
+                .iter()
+                .any(|existing| {
+                    existing.page == item.page
+                        && existing.text == item.text
+                        && existing.bounds == item.bounds
+                })
+        {
+            return Ok(());
+        }
         let tx = self.conn.transaction().map_err(|e| e.to_string())?;
         let id = if item.id == 0 {
             let changed = tx.execute("INSERT INTO annotations(path,page,text,note,color) VALUES(?1,?2,?3,?4,?5) ON CONFLICT DO NOTHING", params![encode(path),item.page,item.text,item.note,item.color]).map_err(|e|e.to_string())?;
@@ -547,6 +560,29 @@ mod annotation_tests {
                 .unwrap(),
             0
         );
+    }
+
+    #[test]
+    fn saving_the_same_highlight_twice_does_not_create_duplicates() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut store = Store::open(&dir.path().join("db")).unwrap();
+        let path = Path::new("a.pdf");
+        let highlight = Annotation {
+            id: 0,
+            page: 2,
+            text: "Selected words".into(),
+            note: String::new(),
+            color: Some(0),
+            bounds: vec![[0.1, 0.2, 0.4, 0.3]],
+        };
+
+        store.save_annotation(path, &highlight).unwrap();
+        store.save_annotation(path, &highlight).unwrap();
+
+        let items = store.annotations(path).unwrap();
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].text, highlight.text);
+        assert_eq!(items[0].bounds, highlight.bounds);
     }
 
     #[test]
