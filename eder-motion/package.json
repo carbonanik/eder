@@ -1,0 +1,38 @@
+{
+  "name": "eder-motion",
+  "version": "1.0.0",
+  "description": "Eder: A quieter way to read. Ten-second product motion video.",
+  "repository": {},
+  "license": "UNLICENSED",
+  "engines": {
+    "node": "^20.19.0 || ^22.13.0 || >=24"
+  },
+  "private": true,
+  "dependencies": {
+    "@remotion/cli": "4.0.545",
+    "@remotion/fonts": "4.0.545",
+    "@remotion/media": "4.0.545",
+    "react": "19.3.1",
+    "react-dom": "19.3.1",
+    "remotion": "4.0.545"
+  },
+  "devDependencies": {
+    "@remotion/eslint-config-flat": "4.0.545",
+    "@types/react": "19.3.0",
+    "@types/web": "0.0.166",
+    "eslint": "10.12.0",
+    "prettier": "3.8.1",
+    "typescript": "5.9.3"
+  },
+  "scripts": {
+    "dev": "remotion studio",
+    "render": "remotion render src/index.ts EderPromo out/eder-10s.mp4 --codec=h264 --crf=18 --pixel-format=yuv420p --audio-codec=aac --concurrency=2 && npm run finish",
+    "finish": "ffmpeg -y -hide_banner -loglevel error -i out/eder-10s.mp4 -map 0:v -map 0:a -c:v copy -af volume=10dB -c:a aac -b:a 192k -t 10 -movflags +faststart out/eder-10s-final.mp4",
+    "build": "remotion bundle",
+    "upgrade": "remotion upgrade",
+    "lint": "eslint src && tsc"
+  },
+  "allowScripts": {
+    "esbuild": false
+  }
+}
