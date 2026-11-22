@@ -7,7 +7,7 @@ pub enum Task {
     SaveAnnotation(PathBuf, Box<crate::domain::annotation::Annotation>),
     DeleteAnnotation(PathBuf, i64),
     ExportAnnotations(PathBuf, PathBuf),
-    Load(u64, View, Option<PathBuf>),
+    Load(u64, View, Option<PathBuf>, bool),
     Root(PathBuf),
     Import(Vec<PathBuf>, PathBuf, PathBuf),
     Favorite(PathBuf, bool),

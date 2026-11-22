@@ -52,6 +52,11 @@ pub trait LibraryFilesystem {
         root: &Path,
         folder: &Path,
     ) -> Result<Vec<crate::domain::document::Entry>, String>;
+    fn scan_recursive(
+        &self,
+        root: &Path,
+        folder: &Path,
+    ) -> Result<Vec<crate::domain::document::Entry>, String>;
     fn within(&self, root: &Path, folder: &Path) -> Result<std::path::PathBuf, String>;
     fn import(
         &self,

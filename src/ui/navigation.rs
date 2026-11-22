@@ -218,9 +218,21 @@ impl Eder {
                         egui::TextEdit::singleline(&mut self.ui.search)
                             .id(egui::Id::new("eder-search"))
                             .hint_text("Search documents...")
-                            .desired_width((width - 107.0).max(75.0))
+                            .desired_width(
+                                (width - if width > 230.0 { 170.0 } else { 107.0 }).max(75.0),
+                            )
                             .frame(false),
                     );
+                    if width > 230.0 {
+                        let before = self.app.recursive_search;
+                        if ui
+                            .checkbox(&mut self.app.recursive_search, "Subfolders")
+                            .changed()
+                            && before != self.app.recursive_search
+                        {
+                            self.load();
+                        }
+                    }
                     if width > 230.0 {
                         ui.label(
                             RichText::new(if cfg!(target_os = "macos") {

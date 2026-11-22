@@ -136,7 +136,7 @@ pub(super) fn run(data: Option<PathBuf>, worker: IoWorker) {
         } else {
             None
         };
-        let failed_listing = if let Task::Load(id, _, _) = &task {
+        let failed_listing = if let Task::Load(id, _, _, _) = &task {
             Some(*id)
         } else {
             None
@@ -160,11 +160,14 @@ pub(super) fn run(data: Option<PathBuf>, worker: IoWorker) {
                     send(Event::Notice("Annotations exported.".into()));
                     return Ok(());
                 }
-                Task::Load(id, view, folder) => {
+                Task::Load(id, view, folder, recursive_search) => {
                     let s = store.snapshot()?;
                     let root = s.root.clone();
                     let rows = match view {
                         View::Library => match (s.root, folder) {
+                            (Some(root), Some(folder)) if recursive_search => {
+                                library.scan_recursive(&root, &folder)
+                            }
                             (Some(root), Some(folder)) => library.scan(&root, &folder),
                             _ => Ok(vec![]),
                         },

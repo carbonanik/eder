@@ -28,7 +28,12 @@ impl Controller {
         self.entries.clear();
         self.document_count = 0;
         self.loading = true;
-        Task::Load(self.listing, self.view, self.folder.clone())
+        Task::Load(
+            self.listing,
+            self.view,
+            self.folder.clone(),
+            self.recursive_search,
+        )
     }
     pub fn handle(&mut self, action: Action, now: Instant) -> bool {
         let Some(reader) = &mut self.reader else {

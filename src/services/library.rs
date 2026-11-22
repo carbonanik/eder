@@ -12,6 +12,9 @@ impl<F: LibraryFilesystem> LibraryService<F> {
     pub fn scan(&self, root: &Path, folder: &Path) -> Result<Vec<Entry>, String> {
         self.filesystem.scan(root, folder)
     }
+    pub fn scan_recursive(&self, root: &Path, folder: &Path) -> Result<Vec<Entry>, String> {
+        self.filesystem.scan_recursive(root, folder)
+    }
     pub fn import(
         &self,
         sources: Vec<PathBuf>,
@@ -30,6 +33,9 @@ mod tests {
     struct ConfinedFilesystem;
     impl LibraryFilesystem for ConfinedFilesystem {
         fn scan(&self, _root: &Path, _folder: &Path) -> Result<Vec<Entry>, String> {
+            Ok(Vec::new())
+        }
+        fn scan_recursive(&self, _root: &Path, _folder: &Path) -> Result<Vec<Entry>, String> {
             Ok(Vec::new())
         }
         fn within(&self, _root: &Path, _folder: &Path) -> Result<PathBuf, String> {

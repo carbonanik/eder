@@ -64,10 +64,55 @@ pub fn scan(root: &Path, requested: &Path) -> Result<Vec<Entry>, String> {
     Ok(entries)
 }
 
+pub fn scan_recursive(root: &Path, requested: &Path) -> Result<Vec<Entry>, String> {
+    let path = within(root, requested)?;
+    let root = root.canonicalize().map_err(|e| e.to_string())?;
+    let mut entries = Vec::new();
+
+    fn visit(root: &Path, folder: &Path, entries: &mut Vec<Entry>) -> Result<(), String> {
+        for item in fs::read_dir(folder).map_err(|e| e.to_string())? {
+            let item = item.map_err(|e| e.to_string())?;
+            let path = item.path();
+            let ft = item.file_type().map_err(|e| e.to_string())?;
+            if ft.is_symlink() {
+                let Ok(canonical) = path.canonicalize() else {
+                    continue;
+                };
+                if !canonical.starts_with(root) {
+                    continue;
+                }
+            }
+
+            if path.is_dir() {
+                visit(root, &path, entries)?;
+            } else if path
+                .extension()
+                .is_some_and(|ext| ext.eq_ignore_ascii_case("pdf"))
+                && path.is_file()
+            {
+                entries.push(Entry {
+                    name: item.file_name().to_string_lossy().into_owned(),
+                    path: path.canonicalize().map_err(|e| e.to_string())?,
+                    directory: false,
+                    available: true,
+                });
+            }
+        }
+        Ok(())
+    }
+
+    visit(&root, &path, &mut entries)?;
+    entries.sort_by_cached_key(|e| (e.name.to_lowercase(), e.name.clone(), e.path.clone()));
+    Ok(entries)
+}
+
 pub struct LocalFilesystem;
 impl crate::services::ports::LibraryFilesystem for LocalFilesystem {
     fn scan(&self, root: &Path, folder: &Path) -> Result<Vec<Entry>, String> {
         scan(root, folder)
+    }
+    fn scan_recursive(&self, root: &Path, folder: &Path) -> Result<Vec<Entry>, String> {
+        scan_recursive(root, folder)
     }
     fn within(&self, root: &Path, folder: &Path) -> Result<PathBuf, String> {
         within(root, folder)
@@ -161,6 +206,21 @@ pub fn revision(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn recursive_scan_finds_nested_pdfs_only() {
+        let d = tempfile::tempdir().unwrap();
+        fs::create_dir_all(d.path().join("one/two")).unwrap();
+        fs::write(d.path().join("root.pdf"), b"test").unwrap();
+        fs::write(d.path().join("one/nested.PDF"), b"test").unwrap();
+        fs::write(d.path().join("one/two/deep.pdf"), b"test").unwrap();
+        fs::write(d.path().join("one/two/ignore.txt"), b"test").unwrap();
+
+        let rows = scan_recursive(d.path(), d.path()).unwrap();
+        assert_eq!(
+            rows.iter().map(|e| e.name.as_str()).collect::<Vec<_>>(),
+            ["deep.pdf", "nested.PDF", "root.pdf"]
+        );
+    }
     #[test]
     fn immediate_case_insensitive_sorted_and_confined() {
         let d = tempfile::tempdir().unwrap();

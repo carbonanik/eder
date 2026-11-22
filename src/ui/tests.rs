@@ -30,6 +30,7 @@ fn compact_and_wide_layouts_virtualize_large_libraries() {
             folder: Some(root.clone()),
             document_count: 10_000,
             collections: Vec::new(),
+            recursive_search: false,
             entries: (0..10_000)
                 .map(|i| Entry {
                     path: root.join(format!("{i}.pdf")),
