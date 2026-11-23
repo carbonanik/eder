@@ -211,16 +211,13 @@ impl Eder {
                     ui.add_space(group_gap);
                     toolbar_group(ui, |ui| self.reader_zoom_tools(ui));
                     if wide_toolbar {
-                        ui.with_layout(
-                            egui::Layout::right_to_left(egui::Align::Center),
-                            |ui| {
-                                ui.allocate_ui_with_layout(
-                                    Vec2::new(212.0, 34.0),
-                                    egui::Layout::left_to_right(egui::Align::Center),
-                                    |ui| self.reader_action_tools(ui),
-                                );
-                            },
-                        );
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            ui.allocate_ui_with_layout(
+                                Vec2::new(212.0, 34.0),
+                                egui::Layout::left_to_right(egui::Align::Center),
+                                |ui| self.reader_action_tools(ui),
+                            );
+                        });
                     } else {
                         self.reader_action_tools(ui);
                     }

@@ -18,7 +18,7 @@ fn main() -> eframe::Result {
         ..Default::default()
     };
     eframe::run_native(
-        "Eder — PDF Library",
+        concat!("Eder — PDF Library v", env!("CARGO_PKG_VERSION")),
         options,
         Box::new(|cc| Ok(Box::new(eder::desktop::Eder::new(cc)))),
     )

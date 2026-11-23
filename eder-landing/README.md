@@ -9,7 +9,7 @@ Open `index.html` in your browser. No build step needed.
 Publish the contents of this directory from the root of your GitHub Pages repository, or copy it into `/docs` in the Eder repo and select that folder in GitHub Pages settings.
 
 ## Before publishing
-- The "Get Eder" section links to the Eder 0.1.0 Linux x86-64 AppImage and GitHub repository.
+- The "Get Eder" section links to the Eder 0.1.3 Linux x86-64 AppImage and GitHub repository.
 - Confirm system requirements and supported platforms for future releases.
 - Replace `assets/eder-app.webp` with an updated screenshot when the UI changes.
 
